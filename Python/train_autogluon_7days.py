@@ -1,44 +1,38 @@
 import pandas as pd
 import warnings
 import os
+from sqlalchemy import create_engine, text
 from autogluon.timeseries import TimeSeriesDataFrame, TimeSeriesPredictor
+from config import MYSQL_CONN_STR
 
 # 忽略不必要的警告，保持終端機乾淨
 warnings.filterwarnings('ignore')
 
 def train_autogluon():
-    print("[Step 1] 正在讀取歷史資料 (股票清單_Cloud.csv)...")
+    # 改成直接讀 MySQL，不再依賴 cloud_crawler_TWSE.py 額外匯出的 CSV 備份檔
+    # （原本讀 CSV 曾發生 CSV 沒寫成功、訓練資料卡在舊日期的問題，MySQL 才是每天真正在更新的資料源）
+    print("[Step 1] 正在從 MySQL 讀取近 2 年歷史資料...")
     try:
-        # 自動抓取本腳本所在的資料夾路徑，避免發生找不到檔案的錯誤
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        csv_path = os.path.join(current_dir, "股票清單_Cloud.csv")
-        df = pd.read_csv(csv_path)
+        engine = create_engine(MYSQL_CONN_STR)
+        query = """
+            SELECT ticker AS 股票代碼, trade_date AS 交易日期, close_price AS 收盤價,
+                   volume AS 成交量, Foreign_Buy AS 外資買賣超
+            FROM StockPrice
+            WHERE trade_date >= (SELECT DATE_SUB(MAX(trade_date), INTERVAL 2 YEAR) FROM StockPrice)
+        """
+        with engine.connect() as conn:
+            df = pd.read_sql(text(query), conn)
     except Exception as e:
         print(f"Error 無法讀取資料: {e}")
         return
 
-    # 1. 清理股票代碼 (去除 Excel 強制字串符號 '="0050"')
-    if '股票代碼' in df.columns:
-        df['股票代碼'] = df['股票代碼'].astype(str).str.replace('="', '').str.replace('"', '')
-    else:
-        print("Error CSV 中找不到 '股票代碼' 欄位")
+    if df.empty:
+        print("Error 查無資料，中止訓練")
         return
 
-    # 2. 處理時間欄位
+    # 處理時間欄位、過濾缺漏收盤價的資料列
     df['交易日期'] = pd.to_datetime(df['交易日期'])
-    
-    # 3. 過濾掉包含太多 NaN 的行數，或是極端值 (保持資料穩定)
     df = df.dropna(subset=['收盤價'])
-    
-    # 只需要保留時序預測最關鍵的欄位，減少記憶體負擔
-    # 外資買賣超與成交量可以作為輔助特徵 (Covariates)
-    keep_cols = ['股票代碼', '交易日期', '收盤價', '成交量', '外資買賣超']
-    keep_cols_exist = [c for c in keep_cols if c in df.columns]
-    df = df[keep_cols_exist]
-    
-    # 如果資料量過於龐大（例如幾萬行），可考慮只取最近 3 年的值來預測未來 7 天，加快速度
-    recent_date_threshold = df['交易日期'].max() - pd.DateOffset(years=2)
-    df = df[df['交易日期'] >= recent_date_threshold]
 
     print("[Step 1] 資料讀取與清洗完成！")
     print(df.head())
@@ -67,11 +61,12 @@ def train_autogluon():
         freq="B"                      # 台灣股市為 Business Days
     )
 
-    # presets="fast_training" 是為求快速的測試組合，正式上雲端時可以改為 "high_quality"
+    # 正式上雲端後改用 high_quality：fast_training 對股價這種高噪音資料太容易選到
+    # 「幾乎拉平複製最後一天數值」的簡單統計模型，7天預測線看起來都差不多平
     predictor.fit(
         ts_data,
-        presets="fast_training",
-        time_limit=3600, # 180秒內盡可能訓練出最好的模型
+        presets="high_quality",
+        time_limit=3600, # 訓練時間上限：3600秒（1小時），每週六排程執行，時間充裕不趕
         random_seed=42
     )
 

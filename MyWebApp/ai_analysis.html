@@ -1,0 +1,991 @@
+﻿<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProQuant AI - AI分析</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* 基礎設定與深色背景 */
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000000;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            color: #ffffff;
+        }
+
+        .app-container {
+            width: 100%;
+            max-width: 414px;
+            height: 100vh;
+            background-color: #121212;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.05);
+            overflow: hidden;
+        }
+
+        /* 頂部 Header */
+        .header {
+            padding: 15px 20px;
+            background-color: #1e1e1e;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #333;
+        }
+        .header-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #e2e8f0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .header-title i { color: #38bdf8; }
+
+        /* 主要內容區 */
+        .content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+            padding-bottom: 80px;
+        }
+        .content::-webkit-scrollbar { display: none; }
+
+        /* 標題與標籤 */
+        .section-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #a0a0a0;
+            margin: 20px 0 10px 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .section-title.first { margin-top: 5px; }
+        .section-badge {
+            background: linear-gradient(135deg, #38bdf8, #3b82f6);
+            color: white;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
+        }
+
+        /* 卡片共用 */
+        .card {
+            background-color: #1e1e1e;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border: 1px solid #2a2a2a;
+        }
+
+        /* A區：預測圖表控制列 */
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .stock-ticker {
+            font-size: 18px;
+            font-weight: bold;
+            color: #fff;
+        }
+        .time-filters {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+        }
+        .ai-search-input {
+            width: 70px; padding: 6px; border-radius: 6px; border: 1px solid #333; 
+            background: #000; color: white; text-align: center; outline: none;
+        }
+        .ai-search-input:focus { border-color: #38bdf8; }
+        .filter-btn {
+            background-color: #38bdf8;
+            color: #000; font-weight: bold;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        #favoriteBtn { background-color: #2a2a2a; color: #94a3b8; }
+        #favoriteBtn.active-favorite { background-color: #facc15; color: #000; }
+
+        .chart-container { position: relative; height: 200px; width: 100%; }
+
+        /* 骨架屏載入動畫，取代空白等待 */
+        @keyframes skeleton-pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+        .skeleton-block { background-color: #2a2a2a; border-radius: 6px; animation: skeleton-pulse 1.4s ease-in-out infinite; }
+        .skeleton-chart { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: flex-end; gap: 6px; padding: 10px 0; }
+        .skeleton-chart .skeleton-block { flex: 1; }
+        .skeleton-summary-line { height: 12px; margin-bottom: 8px; }
+        .skeleton-feature-row { height: 24px; margin-bottom: 10px; }
+
+        .feature-row { margin-bottom: 10px; }
+        .feature-row:last-child { margin-bottom: 0; }
+        .feature-row-header { display: flex; justify-content: space-between; font-size: 12px; color: #cbd5e1; margin-bottom: 4px; }
+        .feature-row-header b { color: #e2e8f0; }
+        .feature-bar-bg { width: 100%; height: 8px; background-color: #2a2a2a; border-radius: 4px; overflow: hidden; }
+        .feature-bar-fill { height: 100%; background: linear-gradient(90deg, #38bdf8, #818cf8); border-radius: 4px; transition: width 0.8s ease; }
+
+
+        /* C區：風險提示警報卡 */
+        .warning-card {
+            background: linear-gradient(to right, rgba(234, 179, 8, 0.1), transparent);
+            border-left: 4px solid #eab308;
+            border-radius: 8px;
+            padding: 15px;
+            display: flex;
+            gap: 15px;
+            align-items: flex-start;
+        }
+        .warning-icon {
+            color: #eab308;
+            font-size: 24px;
+            animation: pulse 2s infinite;
+        }
+        .warning-text h4 { margin: 0 0 5px 0; color: #eab308; font-size: 15px; }
+        .warning-text p { margin: 0; font-size: 13px; color: #cbd5e1; line-height: 1.5; }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        /* 底部導覽列 */
+        .bottom-nav {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            background-color: #1e1e1e;
+            display: flex;
+            justify-content: space-around;
+            padding: 10px 0;
+            border-top: 1px solid #333;
+        }
+        .nav-item {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+            color: #94a3b8;
+            font-size: 12px;
+            cursor: pointer;
+            text-decoration: none;
+        }
+        .nav-item.active { color: #38bdf8; text-shadow: 0 0 10px rgba(56, 189, 248, 0.5); }
+        .nav-item i { font-size: 20px; }
+        .nav-badge-dot { position: absolute; top: 0; left: 55%; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; border: 1.5px solid #1e1e1e; display: none; }
+        .nav-badge-dot.show { display: block; }
+        .header-badge-dot { position: absolute; top: -2px; right: -4px; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; border: 1.5px solid #1e1e1e; display: none; }
+        .header-badge-dot.show { display: block; }
+            .rip-btn { position: relative; overflow: hidden; }
+        .stock-ac-dropdown { position: absolute; top: 100%; left: 0; right: 0; background: #1e1e1e; border: 1px solid #333; border-radius: 8px; margin-top: 4px; max-height: 240px; overflow-y: auto; z-index: 50; }
+        .stock-ac-item { padding: 10px 14px; font-size: 13px; color: #e2e8f0; cursor: pointer; border-bottom: 1px solid #2a2a2a; display: flex; justify-content: space-between; gap: 10px; }
+        .stock-ac-item:last-child { border-bottom: none; }
+        .stock-ac-item:hover { background: #2a2a2a; }
+        .stock-ac-code { color: #64748b; font-size: 12px; white-space: nowrap; }
+        .rip-ink { position: absolute; border-radius: 50%; background: rgba(255,255,255,0.35); pointer-events: none; transform: scale(0); opacity: 0.6; transition: transform 0.55s ease, opacity 0.55s ease; }
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        
+        <div class="header">
+            <div class="header-title"><i class="fas fa-microchip"></i> AI 深度分析引擎</div>
+            <a href="profile.html" style="color: #a0a0a0; text-decoration: none; font-size: 18px; position: relative;"><i class="fas fa-user-circle"></i><span class="header-badge-dot" id="profileBadgeDot"></span></a>
+        </div>
+
+        <div class="content">
+
+            <div id="accuracyBanner" style="display:flex; align-items:center; justify-content:space-between; background: linear-gradient(135deg, rgba(56,189,248,0.1), rgba(129,140,248,0.05)); border: 1px solid rgba(56,189,248,0.25); border-radius: 10px; padding: 10px 14px; margin-bottom: 15px; font-size: 12px; color: #94a3b8;">
+                <span><i class="fas fa-chart-pie" style="color:#38bdf8;"></i> 載入命中率統計中...</span>
+            </div>
+
+            <div class="card" style="margin-bottom: 20px; border-color: #38bdf8;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <i class="fas fa-sparkles" style="color: #38bdf8; font-size: 20px;"></i>
+                    <input type="text" id="geminiInput" placeholder="向 Gemini 發問..." style="flex: 1; padding: 10px; border-radius: 8px; border: 1px solid #333; background-color: #121212; color: white; font-size: 14px; outline: none;">
+                    <button onclick="askGemini()" id="geminiBtn" style="padding: 10px 15px; background-color: #38bdf8; border: none; border-radius: 8px; color: #000; font-weight: bold; cursor: pointer; transition: 0.2s;"><i class="fas fa-paper-plane"></i></button>
+                </div>
+                <div id="geminiResponse" style="margin-top: 15px; display: none; padding: 15px; background-color: rgba(56, 189, 248, 0.1); border-radius: 8px; border-left: 3px solid #38bdf8; font-size: 14px; line-height: 1.6; color: #e2e8f0; white-space: pre-wrap; word-break: break-all;"></div>
+            </div>
+
+            <script>
+                async function askGemini() {
+                    const q = document.getElementById('geminiInput').value.trim();
+                    if(!q) return;
+                    
+                    const btn = document.getElementById('geminiBtn');
+                    const resDiv = document.getElementById('geminiResponse');
+                    
+                    btn.disabled = true;
+                    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                    resDiv.style.display = 'block';
+                    resDiv.innerHTML = '<span style="color: #a0a0a0;">思考中...</span>';
+
+                    // 獲取當前正在看盤/分析的個股代號
+                    const tickerInput = document.getElementById('aiSearchTicker');
+                    const ticker = tickerInput ? tickerInput.value.trim() : null;
+
+                    try {
+                        const response = await fetch(`${API_BASE_URL}/api/gemini/chat`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ query: q, ticker: ticker })
+                        });
+                        const data = await response.json();
+                        
+                        if(response.ok && data.status === 'success') {
+                            resDiv.innerHTML = data.response.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>'); // 簡易 markdown 粗體轉換
+                        } else {
+                            resDiv.innerHTML = `<span style="color: #ef4444;">發生錯誤：${data.detail || '無法取得回應'}</span>`;
+                        }
+                    } catch (e) {
+                        resDiv.innerHTML = `<span style="color: #ef4444;">連線失敗：請確認伺服器狀態</span>`;
+                    } finally {
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="fas fa-paper-plane"></i>';
+                    }
+                }
+            </script>
+
+            <div class="section-title first"><div class="section-badge"><i class="fas fa-chart-line"></i></div> AI 動態預測走勢</div>
+            <div class="card">
+                <div class="chart-header">
+                    <div class="stock-ticker" id="chart-ticker-title">準備中...</div>
+                    <div class="time-filters">
+                        <input type="text" id="aiSearchTicker" class="ai-search-input" value="2382" placeholder="代碼">
+                        <button class="filter-btn" onclick="loadMainPrediction()">AI 推演</button>
+                        <button class="filter-btn" id="favoriteBtn" onclick="toggleFavorite()"><i class="fas fa-star"></i></button>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="predictionChart"></canvas>
+                    <div class="skeleton-chart" id="chartSkeleton">
+                        <div class="skeleton-block" style="height: 40%;"></div>
+                        <div class="skeleton-block" style="height: 65%;"></div>
+                        <div class="skeleton-block" style="height: 50%;"></div>
+                        <div class="skeleton-block" style="height: 80%;"></div>
+                        <div class="skeleton-block" style="height: 55%;"></div>
+                        <div class="skeleton-block" style="height: 70%;"></div>
+                        <div class="skeleton-block" style="height: 45%;"></div>
+                        <div class="skeleton-block" style="height: 60%;"></div>
+                    </div>
+                </div>
+                <div id="chartSummary" style="margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: rgba(255,255,255,0.04); font-size: 13px; color: #cbd5e1; line-height: 1.6;">
+                    <div class="skeleton-block skeleton-summary-line" style="width: 90%;"></div>
+                    <div class="skeleton-block skeleton-summary-line" style="width: 60%;"></div>
+                </div>
+            </div>
+
+            <div class="section-title"><div class="section-badge"><i class="fas fa-list-check"></i></div> AI 判斷依據（模型全域特徵重要性）</div>
+            <div class="card">
+                <div id="featureImportanceMeta" style="font-size: 11px; color: #94a3b8; margin-bottom: 12px;">&nbsp;</div>
+                <div id="featureImportanceList">
+                    <div class="skeleton-block skeleton-feature-row"></div>
+                    <div class="skeleton-block skeleton-feature-row"></div>
+                    <div class="skeleton-block skeleton-feature-row"></div>
+                </div>
+                <div style="font-size: 11px; color: #555; margin-top: 10px;">說明：這是模型訓練時，判斷「明日漲跌」整體最依賴的特徵排名，非單一個股當下的判斷理由。</div>
+            </div>
+
+            <div class="section-title"><div class="section-badge"><i class="fas fa-money-bill-trend-up"></i></div> AI 資金流向提示</div>
+            <div class="card" id="fundFlowContainer">
+                <div style="text-align: center; color: #94a3b8; padding: 20px;"><i class="fas fa-spinner fa-spin"></i> 讀取三大法人籌碼中...</div>
+            </div>
+
+            <div class="section-title"><div class="section-badge"><i class="fas fa-newspaper"></i></div> 重大訊息</div>
+            <div class="card" id="materialNewsContainer">
+                <div style="text-align: center; color: #94a3b8; padding: 20px;"><i class="fas fa-spinner fa-spin"></i> 讀取重大訊息公告中...</div>
+            </div>
+
+            <div class="section-title"><div class="section-badge"><i class="fas fa-comments"></i></div> 輿情分析</div>
+            <div class="card" id="sentimentContainer">
+                <div style="text-align: center; color: #94a3b8; padding: 20px;"><i class="fas fa-spinner fa-spin"></i> 讀取輿情分析中...</div>
+            </div>
+
+        </div>
+
+        <div class="bottom-nav">
+            <a href="dashboard.html" class="nav-item">
+                <i class="fas fa-chart-line"></i>
+                <span>看盤</span>
+            </a>
+            <a href="selection.html" class="nav-item">
+                <i class="fas fa-search-dollar"></i>
+                <span>選股</span>
+            </a>
+            <a href="ai_analysis.html" class="nav-item active">
+                <i class="fas fa-microchip"></i>
+                <span>AI分析</span>
+            </a>
+            <a href="community.html" class="nav-item">
+                <i class="fas fa-users"></i>
+                <span class="nav-badge-dot" id="communityBadgeDot"></span>
+                <span>社群</span>
+            </a>
+            <a href="education.html" class="nav-item">
+                <i class="fas fa-book-open"></i>
+                <span>教學</span>
+            </a>
+        </div>
+
+    </div>
+
+    <script>
+        // 確保與後端 API 伺服器對齊
+        const API_BASE_URL = "https://128gzb5evxna.shares.zrok.io";
+
+        // --- JWT Auth Interceptor ---
+        const originalFetch = window.fetch;
+        window.fetch = async function() {
+            let [resource, config] = arguments;
+            if(typeof resource === 'string' && resource.includes(API_BASE_URL)) {
+                config = config || {};
+                config.headers = config.headers || {};
+                config.headers['skip_zrok_interstitial'] = 'true';
+                const token = localStorage.getItem('access_token');
+                if (token) {
+                    config.headers['Authorization'] = 'Bearer ' + token;
+                }
+            }
+            const response = await originalFetch(resource, config);
+            if(response.status === 401 && !resource.includes('/api/auth/login') && !resource.includes('/api/auth/register')) {
+                alert('登入已過期或權限不足，請重新登入');
+                window.location.href = 'login.html';
+            }
+            return response;
+        };
+        // -----------------------------
+ 
+        let aiChartInstance = null;
+        let currentTicker = '2382';
+        let currentStockName = '';
+        let favoriteTickers = new Set();
+
+        // --- 收藏功能 ---
+        async function refreshFavoriteState() {
+            const token = localStorage.getItem('access_token');
+            if (!token) return;
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/favorites`);
+                const data = await res.json();
+                favoriteTickers = new Set(data.map(f => f.ticker));
+                updateFavoriteBtn();
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        function updateFavoriteBtn() {
+            const btn = document.getElementById('favoriteBtn');
+            if (!btn) return;
+            btn.classList.toggle('active-favorite', favoriteTickers.has(currentTicker));
+        }
+
+        async function toggleFavorite() {
+            const token = localStorage.getItem('access_token');
+            if (!token) {
+                alert('請先登入才能使用收藏功能');
+                window.location.href = 'login.html';
+                return;
+            }
+            try {
+                if (favoriteTickers.has(currentTicker)) {
+                    await fetch(`${API_BASE_URL}/api/favorites/${currentTicker}`, { method: 'DELETE' });
+                    favoriteTickers.delete(currentTicker);
+                } else {
+                    await fetch(`${API_BASE_URL}/api/favorites/${currentTicker}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ stock_name: currentStockName })
+                    });
+                    favoriteTickers.add(currentTicker);
+                }
+                updateFavoriteBtn();
+            } catch (err) {
+                console.error(err);
+                alert('操作失敗，請稍後再試');
+            }
+        }
+
+        // ==========================================
+        // 1. 動態繪製 AI 預測圖表 (融合真實數據與 AI 運算趨勢)
+        // ==========================================
+        async function loadMainPrediction() {
+            const ticker = document.getElementById('aiSearchTicker').value || '2382';
+            currentTicker = ticker;
+            localStorage.setItem('lastViewedTicker', ticker);
+            document.getElementById('chart-ticker-title').innerText = `分析 ${ticker}...`;
+            loadFundFlow(ticker);
+            loadMaterialNews(ticker);
+
+            const skeleton = document.getElementById('chartSkeleton');
+            if (skeleton) skeleton.style.display = 'flex';
+            document.getElementById('chartSummary').innerHTML =
+                '<div class="skeleton-block skeleton-summary-line" style="width: 90%;"></div>' +
+                '<div class="skeleton-block skeleton-summary-line" style="width: 60%;"></div>';
+
+            try {
+                // 1. 先抓取歷史股價資料與 AI 信心指數，畫線跟文字摘要都會用到
+                const [stockRes, predResEarly] = await Promise.all([
+                    fetch(`${API_BASE_URL}/api/stock/${ticker}`),
+                    fetch(`${API_BASE_URL}/api/prediction/${ticker}`).catch(() => null)
+                ]);
+                if (!stockRes.ok) throw new Error("無股價資料");
+                const predDataEarly = (predResEarly && predResEarly.ok) ? await predResEarly.json() : null;
+
+                // 輿情卡片直接沿用這裡已經抓好的預測資料，不用再打一次 /api/prediction
+                if (predDataEarly) {
+                    renderSentimentBox(ticker, predDataEarly.sentiment_adjustment || 0);
+                } else {
+                    loadSentiment(ticker);
+                }
+
+                const stockData = (await stockRes.json()).data;
+                const stockName = stockData[stockData.length - 1].stock_name || ticker;
+                currentStockName = stockName;
+                document.getElementById('chart-ticker-title').innerText = `${stockName} (${ticker})`;
+                updateFavoriteBtn();
+
+                // 記錄瀏覽歷史（僅在已登入時）
+                if (localStorage.getItem('access_token')) {
+                    fetch(`${API_BASE_URL}/api/history/${ticker}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ stock_name: stockName })
+                    }).catch(err => console.error(err));
+                }
+
+                // 準備繪圖資料
+                const recentData = stockData.slice(-15);
+                const realDates = recentData.map(d => d.trade_date.slice(5));
+                const realPrices = recentData.map(d => d.close_price);
+                const lastRealPrice = realPrices[realPrices.length - 1];
+                const lastATR = stockData[stockData.length - 1].ATR || null;
+
+                // 2. 嘗試抓取 AutoGluon 7 天預測
+                try {
+                    const trendRes = await fetch(`${API_BASE_URL}/api/trend_7days/${ticker}`);
+                    if (!trendRes.ok) throw new Error("AutoGluon fails");
+                    
+                    const trendData = await trendRes.json();
+                    const predictions = trendData.predictions;
+                    
+                    const futureDates = predictions.map(p => p.date.slice(5));
+                    const futurePrices = predictions.map(p => p.mean);
+                    const upper = predictions.map(p => p.upper);
+                    const lower = predictions.map(p => p.lower);
+                    
+                    const allLabels = [...realDates, ...futureDates];
+                    const historyLineData = [...realPrices, ...Array(futureDates.length).fill(null)];
+                    
+                    // 為了讓線段連起來，把最後一天的真實股價當作預測線的起點
+                    const predictionLineData = Array(realPrices.length - 1).fill(null).concat([lastRealPrice, ...futurePrices]);
+                    const upperBoundData = Array(realPrices.length - 1).fill(null).concat([lastRealPrice, ...upper]);
+                    const lowerBoundData = Array(realPrices.length - 1).fill(null).concat([lastRealPrice, ...lower]);
+                    
+                    const isBullish = futurePrices[futurePrices.length - 1] > lastRealPrice;
+                    
+                    const allVisiblePrices = [...realPrices, ...futurePrices, ...upper, ...lower];
+                    const minY = Math.min(...allVisiblePrices) * 0.95;
+                    const maxY = Math.max(...allVisiblePrices) * 1.05;
+                    
+                    renderChart(allLabels, historyLineData, predictionLineData, upperBoundData, lowerBoundData, minY, maxY, isBullish);
+                    updateChartSummary(futureDates[futureDates.length - 1], futurePrices[futurePrices.length - 1], lastRealPrice, isBullish, null, lower[lower.length - 1], upper[upper.length - 1], lastATR);
+                    return; // 成功則提早結束
+                } catch (e) {
+                    console.warn("AutoGluon 預測失敗或準備中，降級使用 XGBoost 斜率推演...", e);
+                }
+
+                // 降級方案：使用 XGBoost 信心指數做 3 天斜率推演
+                const predData = predDataEarly || await (await fetch(`${API_BASE_URL}/api/prediction/${ticker}`)).json();
+
+                // 💡 核心亮點：根據 AI 信心指數，動態計算未來 3 天的斜率！
+                const confidence = predData.confidence;
+                let dailyTrend = 1.0; 
+                
+                if (confidence >= 50) {
+                    // 看漲：每天漲幅根據信心度遞增 (最高 +3%)
+                    dailyTrend = 1.0 + ((confidence - 50) / 50) * 0.03;
+                } else {
+                    // 看跌：每天跌幅根據信心度遞增 (最高 -3%)
+                    dailyTrend = 1.0 - ((50 - confidence) / 50) * 0.03;
+                }
+
+                const futureDates = ['D+1', 'D+2', 'D+3'];
+                const futurePrices = [
+                    lastRealPrice * dailyTrend, 
+                    lastRealPrice * (dailyTrend ** 2), 
+                    lastRealPrice * (dailyTrend ** 3)
+                ];
+
+                const allLabels = [...realDates, ...futureDates];
+                const historyLineData = [...realPrices, null, null, null];
+                const predictionLineData = Array(realPrices.length - 1).fill(null).concat([lastRealPrice, ...futurePrices]);
+
+                // 計算信賴區間
+                const upperBoundData = predictionLineData.map(p => p !== null ? p * 1.05 : null);
+                const lowerBoundData = predictionLineData.map(p => p !== null ? p * 0.95 : null);
+
+                // 動態 Y 軸
+                const allVisiblePrices = [...realPrices, ...futurePrices];
+                const minY = Math.min(...allVisiblePrices) * 0.9;
+                const maxY = Math.max(...allVisiblePrices) * 1.15;
+
+                renderChart(allLabels, historyLineData, predictionLineData, upperBoundData, lowerBoundData, minY, maxY, confidence >= 50);
+                updateChartSummary(futureDates[futureDates.length - 1], futurePrices[futurePrices.length - 1], lastRealPrice, confidence >= 50, confidence, undefined, undefined, lastATR);
+
+            } catch (error) {
+                console.error("圖表載入失敗:", error);
+                document.getElementById('chart-ticker-title').innerText = "發生錯誤";
+                const skeleton = document.getElementById('chartSkeleton');
+                if (skeleton) skeleton.style.display = 'none';
+            }
+        }
+
+        // ==========================================
+        // AI 資金流向提示：用三大法人近3日買賣超算出籌碼面偏多/偏空
+        // ==========================================
+        async function loadFundFlow(ticker) {
+            const box = document.getElementById('fundFlowContainer');
+            if (!box) return;
+            box.innerHTML = '<div style="text-align: center; color: #94a3b8; padding: 20px;"><i class="fas fa-spinner fa-spin"></i> 讀取三大法人籌碼中...</div>';
+
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/institutional/${ticker}?limit=5`);
+                if (!res.ok) throw new Error('無法取得法人資料');
+                const json = await res.json();
+                const rows = (json.data || []).slice(-3);
+                if (rows.length === 0) throw new Error('查無法人資料');
+
+                const sum = (key) => rows.reduce((s, r) => s + (r[key] || 0), 0);
+                const foreign = sum('foreign');
+                const trust = sum('trust');
+                const dealer = sum('dealer');
+                const days = rows.length;
+
+                const fmt = (v) => (v >= 0 ? '+' : '') + Math.round(v).toLocaleString() + ' 張';
+                const legHtml = (label, val) => `
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #2a2a2a;">
+                        <span style="font-size:13px; color:#cbd5e1;">${label}</span>
+                        <span style="font-size:14px; font-weight:bold; color:${val >= 0 ? '#ef4444' : '#22c55e'};">${fmt(val)}</span>
+                    </div>`;
+
+                let tone, toneColor, toneIcon;
+                if (foreign > 0 && trust > 0) { tone = '外資與投信同步買超，籌碼面偏多'; toneColor = '#ef4444'; toneIcon = 'fa-arrow-trend-up'; }
+                else if (foreign < 0 && trust < 0) { tone = '外資與投信同步賣超，籌碼面偏空'; toneColor = '#22c55e'; toneIcon = 'fa-arrow-trend-down'; }
+                else if (foreign > 0 && trust <= 0) { tone = '外資買超、投信賣超，籌碼分歧'; toneColor = '#eab308'; toneIcon = 'fa-arrows-left-right'; }
+                else if (foreign <= 0 && trust > 0) { tone = '外資賣超、投信買超，籌碼分歧'; toneColor = '#eab308'; toneIcon = 'fa-arrows-left-right'; }
+                else { tone = '籌碼變化不明顯，觀望為主'; toneColor = '#94a3b8'; toneIcon = 'fa-minus'; }
+
+                box.innerHTML = `
+                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px; padding:10px 12px; background:rgba(56,189,248,0.06); border-radius:8px;">
+                        <i class="fas ${toneIcon}" style="color:${toneColor}; font-size:18px;"></i>
+                        <span style="font-size:13px; color:#e2e8f0;">近${days}個交易日：<b style="color:${toneColor};">${tone}</b></span>
+                    </div>
+                    ${legHtml('外資買賣超', foreign)}
+                    ${legHtml('投信買賣超', trust)}
+                    ${legHtml('自營商買賣超', dealer)}
+                    <div style="font-size:11px; color:#555; margin-top:10px;">資料來源：近${days}個交易日三大法人買賣超加總，正值代表買超、負值代表賣超。僅供參考，不代表未來走勢。</div>
+                `;
+            } catch (err) {
+                console.error(err);
+                box.innerHTML = '<div style="text-align: center; color: #94a3b8; padding: 20px; font-size: 13px;"><i class="fas fa-circle-exclamation"></i> 目前查無此股票的法人籌碼資料</div>';
+            }
+        }
+
+        // ==========================================
+        // 重大訊息：資料來源證交所 OpenAPI，點標題可展開完整說明
+        // ==========================================
+        async function loadMaterialNews(ticker) {
+            const box = document.getElementById('materialNewsContainer');
+            if (!box) return;
+            box.innerHTML = '<div style="text-align: center; color: #94a3b8; padding: 20px;"><i class="fas fa-spinner fa-spin"></i> 讀取重大訊息公告中...</div>';
+
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/material_news/${ticker}?limit=15`);
+                if (!res.ok) throw new Error('無法取得重大訊息');
+                const json = await res.json();
+                const rows = json.data || [];
+
+                if (rows.length === 0) {
+                    box.innerHTML = '<div style="text-align: center; color: #94a3b8; padding: 20px; font-size: 13px;"><i class="fas fa-inbox"></i> 近期查無此股票的重大訊息公告</div>';
+                    return;
+                }
+
+                box.innerHTML = rows.map((n, idx) => `
+                    <div style="padding: 10px 0; border-bottom: 1px solid #2a2a2a; cursor: pointer;" onclick="toggleNewsDetail(${idx})">
+                        <div style="display:flex; justify-content:space-between; gap:10px;">
+                            <span style="font-size:13px; color:#e2e8f0; line-height:1.5;">${n.subject}</span>
+                            <span style="font-size:11px; color:#64748b; white-space:nowrap;">${n.date}</span>
+                        </div>
+                        <div id="newsDetail-${idx}" style="display:none; margin-top:8px; font-size:12px; color:#94a3b8; line-height:1.6; white-space:pre-wrap;">${(n.detail || '（無詳細說明）').replace(/</g, '&lt;')}</div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error(err);
+                box.innerHTML = '<div style="text-align: center; color: #94a3b8; padding: 20px; font-size: 13px;"><i class="fas fa-circle-exclamation"></i> 重大訊息載入失敗</div>';
+            }
+        }
+
+        function toggleNewsDetail(idx) {
+            const el = document.getElementById(`newsDetail-${idx}`);
+            if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+        }
+
+        // ==========================================
+        // 輿情分析：顯示目前輿情對信心指數的影響，並可手動觸發更新
+        // ==========================================
+        async function loadSentiment(ticker) {
+            const box = document.getElementById('sentimentContainer');
+            if (!box) return;
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/prediction/${ticker}`);
+                if (!res.ok) throw new Error('無法取得輿情資料');
+                const data = await res.json();
+                renderSentimentBox(ticker, data.sentiment_adjustment || 0);
+            } catch (err) {
+                console.error(err);
+                box.innerHTML = '<div style="text-align: center; color: #94a3b8; padding: 20px; font-size: 13px;"><i class="fas fa-circle-exclamation"></i> 輿情資料讀取失敗</div>';
+            }
+        }
+
+        function renderSentimentBox(ticker, adj) {
+            const box = document.getElementById('sentimentContainer');
+            if (!box) return;
+            const tone = adj > 0 ? '偏多' : (adj < 0 ? '偏空' : '中性');
+            const color = adj > 0 ? '#ef4444' : (adj < 0 ? '#22c55e' : '#94a3b8');
+            box.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <span style="font-size:13px; color:#cbd5e1;">目前輿情對信心指數的影響</span>
+                    <span style="font-size:15px; font-weight:bold; color:${color};">${adj >= 0 ? '+' : ''}${adj}%（${tone}）</span>
+                </div>
+                <div style="font-size:11px; color:#555; margin-bottom:12px;">資料來源：新聞、PTT、Dcard討論經 AI 綜合評分。這個數值只在系統排程或手動更新後才會改變，不是每分鐘即時變動。</div>
+                <button class="rip-btn" id="sentimentRefreshBtn" onclick="refreshSentiment('${ticker}')" style="width:100%; padding:10px; background:#1e293b; border:1px solid #38bdf8; border-radius:8px; color:#38bdf8; font-weight:bold; cursor:pointer; font-size:13px;">
+                    <i class="fas fa-rotate"></i> 更新本股最新輿情
+                </button>
+            `;
+        }
+
+        async function refreshSentiment(ticker) {
+            const btn = document.getElementById('sentimentRefreshBtn');
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 分析中，約需10-20秒...'; }
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/sentiment/run_crawler/${ticker}`, { method: 'POST' });
+                if (!res.ok) throw new Error('更新失敗');
+                await loadSentiment(ticker);
+            } catch (err) {
+                console.error(err);
+                alert('輿情更新失敗，請稍後再試');
+                if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-rotate"></i> 更新本股最新輿情'; }
+            }
+        }
+
+        function renderChart(labels, hist, pred, upper, lower, minY, maxY, isBullish) {
+            const skeleton = document.getElementById('chartSkeleton');
+            if (skeleton) skeleton.style.display = 'none';
+
+            const ctx = document.getElementById('predictionChart').getContext('2d');
+            
+            // 根據多空設定區間顏色 (紅漲綠跌)
+            const mainColor = isBullish ? '#ef4444' : '#22c55e';
+            const gradientFill = ctx.createLinearGradient(0, 0, 0, 200);
+            gradientFill.addColorStop(0, isBullish ? 'rgba(239, 68, 68, 0.3)' : 'rgba(34, 197, 94, 0.3)');
+            gradientFill.addColorStop(1, 'rgba(0, 0, 0, 0.0)');
+
+            if (aiChartInstance) aiChartInstance.destroy();
+
+            aiChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        { label: 'Upper', data: upper, borderColor: 'transparent', pointRadius: 0, fill: false },
+                        { label: 'Lower', data: lower, borderColor: 'transparent', backgroundColor: gradientFill, pointRadius: 0, fill: '-1' },
+                        { label: '歷史', data: hist, borderColor: '#e2e8f0', borderWidth: 2, tension: 0.3, pointRadius: 0, fill: false },
+                        { 
+                            label: '預測', data: pred, 
+                            borderColor: mainColor, borderWidth: 2, borderDash: [5, 5], tension: 0.3,
+                            pointBackgroundColor: mainColor,
+                            pointRadius: (ctx) => ctx.dataIndex === labels.length - 1 ? 5 : 0, 
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    interaction: { intersect: false, mode: 'index' },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            labels: {
+                                color: '#a0a0a0', font: { size: 11 }, boxWidth: 14,
+                                // 只顯示「歷史」跟「預測」兩條線，Upper/Lower 是畫陰影用的輔助資料，不需要出現在圖例
+                                filter: (item) => item.text === '歷史' || item.text === '預測'
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { grid: { color: '#333', drawBorder: false }, ticks: { color: '#a0a0a0', font: { size: 10 } } },
+                        y: { grid: { color: '#333', drawBorder: false }, ticks: { color: '#a0a0a0', font: { size: 10 } }, min: minY, max: maxY }
+                    }
+                }
+            });
+        }
+
+        // 用白話文字說明 AI 預測結論，讓不熟統計圖表的人也看得懂
+        // 注意：confidence（XGBoost 次日方向信心）跟 rangeLow/rangeHigh（AutoGluon 7天區間）是兩個不同模型的產出，
+        // 只有在同一個模型算出來的情境下才會一起顯示，避免兩個模型「打架」看起來像 bug（例如看漲但信心只有1%）
+        function updateChartSummary(targetLabel, targetPrice, lastRealPrice, isBullish, confidence, rangeLow, rangeHigh, atr) {
+            const summaryEl = document.getElementById('chartSummary');
+            if (!summaryEl) return;
+
+            const diff = targetPrice - lastRealPrice;
+            const percent = (diff / lastRealPrice) * 100;
+            const dirText = isBullish ? '看漲 📈' : '看跌 📉';
+            const dirColor = isBullish ? '#ef4444' : '#22c55e';
+            const sign = diff >= 0 ? '+' : '';
+
+            let extraText = '';
+            if (confidence !== null && confidence !== undefined) {
+                extraText = `，AI 信心指數 <b>${Math.round(confidence)}%</b>`;
+            } else if (rangeLow !== undefined && rangeHigh !== undefined) {
+                extraText = `，預測區間約 <b>$${rangeLow.toFixed(2)} ~ $${rangeHigh.toFixed(2)}</b>`;
+            }
+
+            let suggestionHtml = '';
+            if (atr && atr > 0) {
+                if (isBullish) {
+                    const stopLoss = lastRealPrice - 1.5 * atr;
+                    const takeProfit = targetPrice > lastRealPrice ? targetPrice : lastRealPrice + 2 * atr;
+                    const stopLossPct = ((stopLoss - lastRealPrice) / lastRealPrice) * 100;
+                    suggestionHtml = `
+                        <div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.08);">
+                            <div style="color:#94a3b8; font-size:11px; margin-bottom:6px;">📍 操作參考（依 ATR 波動幅度計算，非投資建議）</div>
+                            <div style="display:flex; justify-content:space-between; font-size:12px;">
+                                <span>進場參考：<b style="color:#e2e8f0;">$${lastRealPrice.toFixed(2)}</b></span>
+                                <span>停損：<b style="color:#22c55e;">$${stopLoss.toFixed(2)}</b> (${stopLossPct.toFixed(1)}%)</span>
+                                <span>停利：<b style="color:#ef4444;">$${takeProfit.toFixed(2)}</b></span>
+                            </div>
+                        </div>`;
+                } else {
+                    suggestionHtml = `
+                        <div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.08); font-size:12px; color:#94a3b8;">
+                            📍 AI 偏向看跌，不建議此時追價進場，已持有者可考慮設好停損觀望
+                        </div>`;
+                }
+            }
+
+            summaryEl.innerHTML =
+                `<span style="color:${dirColor}; font-weight:bold;">${dirText}</span>　` +
+                `AI 預測 <b>${targetLabel}</b> 收盤價約 <b>$${targetPrice.toFixed(2)}</b>` +
+                `（較目前 ${sign}${diff.toFixed(2)}，${sign}${percent.toFixed(2)}%）${extraText}。` +
+                `<br><span style="color:#94a3b8; font-size:12px;">圖中紅/綠陰影範圍代表 AI 預測的合理波動區間，僅供參考，不代表保證會發生。</span>` +
+                suggestionHtml;
+        }
+
+        // ==========================================
+        // 2. 頁面載入時執行
+        // ==========================================
+        // 底部導覽列未讀紅點：比對後端資料是否有比「上次查看時間」更新的內容
+        async function checkBadgeStatus() {
+            const token = localStorage.getItem('access_token');
+            if (!token) return;
+
+            let communitySince = localStorage.getItem('community_badge_seen');
+            if (!communitySince) {
+                communitySince = new Date().toISOString();
+                localStorage.setItem('community_badge_seen', communitySince);
+            }
+            let repliesSince = localStorage.getItem('notif_badge_seen');
+            if (!repliesSince) {
+                repliesSince = new Date().toISOString();
+                localStorage.setItem('notif_badge_seen', repliesSince);
+            }
+
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/notifications/badge_status?community_since=${encodeURIComponent(communitySince)}&replies_since=${encodeURIComponent(repliesSince)}`);
+                const data = await res.json();
+                if (data.status !== 'success') return;
+
+                const communityDot = document.getElementById('communityBadgeDot');
+                if (communityDot) communityDot.classList.toggle('show', !!data.has_new_community_posts);
+
+                const profileDot = document.getElementById('profileBadgeDot');
+                if (profileDot) profileDot.classList.toggle('show', !!data.has_new_replies_to_me);
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        window.onload = () => {
+            checkBadgeStatus();
+            // 若從其他頁面（例如「我的收藏」）帶入 ?ticker= 參數，優先使用；
+            // 否則接續你上次在看盤/AI分析頁最後查看的股票
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlTicker = urlParams.get('ticker') || localStorage.getItem('lastViewedTicker');
+            if (urlTicker) {
+                document.getElementById('aiSearchTicker').value = urlTicker;
+            }
+
+            refreshFavoriteState();
+            loadMainPrediction();  // 載入A區的大圖表
+            loadFeatureImportance(); // 載入 A+ 區的模型可解釋性
+            loadPredictionAccuracy(); // 載入頂部命中率橫幅
+            setupStockAutocomplete('aiSearchTicker', () => loadMainPrediction());
+        };
+
+        // ==========================================
+        // 回測命中率橫幅：老實秀出 AI 過去預測準不準
+        // ==========================================
+        async function loadPredictionAccuracy() {
+            const bannerEl = document.getElementById('accuracyBanner');
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/prediction_accuracy?days=30`);
+                const result = await res.json();
+
+                if (result.status !== 'success') {
+                    bannerEl.innerHTML = `<span><i class="fas fa-chart-pie"></i> ${result.message || '命中率統計尚未就緒'}</span>`;
+                    return;
+                }
+
+                if (!result.sample_size || result.sample_size === 0) {
+                    bannerEl.innerHTML = `<span><i class="fas fa-chart-pie"></i> 命中率統計累積中，尚無已驗證的預測樣本</span>`;
+                    return;
+                }
+
+                const rate = result.hit_rate;
+                const rateColor = rate >= 55 ? '#22c55e' : (rate >= 45 ? '#eab308' : '#ef4444');
+                bannerEl.innerHTML = `
+                    <span><i class="fas fa-chart-pie" style="color:#38bdf8;"></i> AI 近 ${result.days} 天預測命中率</span>
+                    <span style="font-weight:bold; color:${rateColor}; font-size:14px;">${rate}%　<span style="font-weight:normal; color:#94a3b8; font-size:11px;">(樣本 ${result.sample_size} 筆)</span></span>
+                `;
+            } catch (err) {
+                console.error(err);
+                bannerEl.innerHTML = `<span><i class="fas fa-chart-pie"></i> 命中率載入失敗</span>`;
+            }
+        }
+
+        // ==========================================
+        // 模型可解釋性：載入全域特徵重要性排名
+        // ==========================================
+        async function loadFeatureImportance() {
+            const metaEl = document.getElementById('featureImportanceMeta');
+            const listEl = document.getElementById('featureImportanceList');
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/feature_importance`);
+                const result = await res.json();
+
+                if (result.status !== 'success' || !result.features || result.features.length === 0) {
+                    metaEl.innerText = result.message || '尚無特徵重要性資料';
+                    listEl.innerHTML = '';
+                    return;
+                }
+
+                metaEl.innerText = `模型盲測準確率 ${(result.accuracy * 100).toFixed(2)}%　更新於 ${result.updated_at}`;
+
+                const maxImportance = Math.max(...result.features.map(f => f.importance));
+                listEl.innerHTML = result.features.slice(0, 8).map(f => {
+                    const pct = maxImportance > 0 ? (f.importance / maxImportance) * 100 : 0;
+                    return `
+                        <div class="feature-row">
+                            <div class="feature-row-header">
+                                <span>${f.name}</span>
+                                <b>${(f.importance * 100).toFixed(1)}%</b>
+                            </div>
+                            <div class="feature-bar-bg">
+                                <div class="feature-bar-fill" style="width: ${pct}%;"></div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (err) {
+                console.error(err);
+                metaEl.innerText = '載入失敗，請檢查網路連線';
+                listEl.innerHTML = '';
+            }
+        }
+    </script>
+    <script>
+        document.addEventListener('click', function(e) {
+            const btn = e.target.closest('.rip-btn');
+            if (!btn) return;
+            const rect = btn.getBoundingClientRect();
+            const size = Math.max(rect.width, rect.height) * 2;
+            const ink = document.createElement('span');
+            ink.className = 'rip-ink';
+            ink.style.width = ink.style.height = size + 'px';
+            ink.style.left = (e.clientX - rect.left - size / 2) + 'px';
+            ink.style.top = (e.clientY - rect.top - size / 2) + 'px';
+            btn.appendChild(ink);
+            requestAnimationFrame(() => { ink.style.transform = 'scale(1)'; ink.style.opacity = '0'; });
+            setTimeout(() => ink.remove(), 600);
+        });
+    </script>
+    <script>
+        // 股票中文名稱／代碼搜尋自動完成，可套在任何 <input> 上
+        function setupStockAutocomplete(inputId, onSelect) {
+            const input = document.getElementById(inputId);
+            if (!input) return;
+            const parent = input.parentElement;
+            if (getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
+
+            const dropdown = document.createElement('div');
+            dropdown.className = 'stock-ac-dropdown';
+            dropdown.style.display = 'none';
+            parent.appendChild(dropdown);
+
+            let debounceTimer;
+            input.addEventListener('input', () => {
+                clearTimeout(debounceTimer);
+                const q = input.value.trim();
+                if (!q) { dropdown.style.display = 'none'; return; }
+                debounceTimer = setTimeout(async () => {
+                    try {
+                        const res = await fetch(`${API_BASE_URL}/api/search_stock?q=${encodeURIComponent(q)}`);
+                        const json = await res.json();
+                        const items = json.data || [];
+                        if (items.length === 0) { dropdown.style.display = 'none'; return; }
+                        dropdown.innerHTML = items.map(it => `<div class="stock-ac-item" data-ticker="${it.ticker}"><span>${it.name}</span><span class="stock-ac-code">${it.ticker}</span></div>`).join('');
+                        dropdown.style.display = 'block';
+                    } catch (err) {
+                        console.error(err);
+                    }
+                }, 300);
+            });
+
+            dropdown.addEventListener('mousedown', (e) => {
+                const item = e.target.closest('.stock-ac-item');
+                if (!item) return;
+                const ticker = item.dataset.ticker;
+                input.value = ticker;
+                dropdown.style.display = 'none';
+                if (onSelect) onSelect(ticker);
+            });
+
+            document.addEventListener('click', (e) => {
+                if (!parent.contains(e.target)) dropdown.style.display = 'none';
+            });
+        }
+    </script>
+</body>
+</html>

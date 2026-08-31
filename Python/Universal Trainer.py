@@ -4,12 +4,15 @@
 # 2. 欄位名稱完全對齊：將英文特徵名修改為與 CSV 一致的中文標題。
 # 3. 特徵工程升級：修正均線斜率計算邏輯，與爬蟲欄位命名匹配。
 
+import json
+from datetime import datetime
 import pandas as pd
 import numpy as np
 import xgboost as xgb
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from sklearn.model_selection import train_test_split
-import os
+from sqlalchemy import create_engine, text
+from config import MYSQL_CONN_STR
 
 # ==========================================
 # 1. 設定終極特徵清單 (必須與 CSV 欄位標題完全一致)
@@ -62,20 +65,36 @@ def perform_feature_engineering(df):
     return df
 
 def train_brain():
-    csv_file = "股票清單_Cloud.csv"
+    # 改成直接讀 MySQL，不再依賴 cloud_crawler_TWSE.py 額外匯出的 CSV 備份檔
+    # （CSV 曾經發生沒寫成功、訓練資料卡在舊日期的問題，MySQL 才是每天真正在更新的資料源）
     model_output = "model_universal.json"
 
-    if not os.path.exists(csv_file):
-        print(f"❌ 找不到 {csv_file}")
-        return
+    print(f"📂 正在從 MySQL 載入海量數據...")
+    engine = create_engine(MYSQL_CONN_STR)
+    query = """
+        SELECT
+            ticker AS 股票代碼, trade_date AS 交易日期, close_price AS 收盤價,
+            RSI_6, RSI_14,
+            MACD_DIF AS MACD_快線, MACD_Signal AS MACD_慢線, MACD_Hist AS MACD_柱狀,
+            KD_K AS K值, KD_D AS D值, ATR,
+            Vol_Ratio AS 量能比,
+            Bias_5 AS `5日乖離`, Bias_20 AS `20日乖離`,
+            Change_1D AS 漲跌幅_1日, Change_3D AS 漲跌幅_3日, Change_5D AS 漲跌幅_5日,
+            Gap AS 跳空缺口,
+            Revenue_YoY AS 營收YoY, EPS, PE_Ratio AS 本益比, PB_Ratio AS 股價淨值比,
+            Market_Return AS 大盤漲跌幅, SOX_Return AS 費半漲跌, TWD_Exchange AS 台幣匯率,
+            Foreign_Buy AS 外資買賣超, Trust_Buy AS 投信買賣超, Dealer_Buy AS 自營商買賣超,
+            Sentiment_Score AS 情緒分數,
+            MA_5 AS `5日均線`, MA_20 AS `20日均線`, MA_60 AS `60日均線`
+        FROM StockPrice
+        ORDER BY 股票代碼, 交易日期
+    """
+    with engine.connect() as conn:
+        df = pd.read_sql(text(query), conn)
 
-    print(f"📂 正在載入海量數據... ")
-    # 指定 dtype 確保股票代碼不丟失前導零
-    df = pd.read_csv(csv_file, dtype={'股票代碼': str})
-    
-    # 清理股票代碼格式
-    df["股票代碼"] = df["股票代碼"].astype(str).str.replace('="', '').str.replace('"', '')
-    df = df.sort_values(["股票代碼", "交易日期"])
+    if df.empty:
+        print("❌ 查無資料，中止訓練")
+        return
 
     print(f"✅ 成功載入 {len(df)} 筆交易紀錄。")
 
@@ -142,43 +161,6 @@ def train_brain():
     print(f"\n✨ 訓練完成！最佳迭代次數: {model.best_iteration}")
     print(f"💾 終極模型已存至: {model_output}")
 
-    # ==========================================
-    # ★ 新增：未來 1~7 天軌跡趨勢預測大腦 (Regressor)
-    # ==========================================
-    print(f"\n📈 開始訓練未來 1~7 天走勢回歸大腦...")
-    for day in range(1, 8):
-        print(f"   ► 正在建構 T+{day} 趨勢大腦...")
-        # 標註未來 N 日的報酬率
-        df_trend = df.copy()
-        df_trend['target_reg'] = df_trend.groupby('股票代碼')['收盤價'].transform(lambda x: (x.shift(-day) - x) / x)
-        
-        # 過濾掉可能因為除以 0 產生的 inf，並丟棄缺失值
-        df_trend['target_reg'] = df_trend['target_reg'].replace([np.inf, -np.inf], np.nan)
-        df_reg_clean = df_trend.dropna(subset=['target_reg']).copy()
-        X_reg_full = df_reg_clean[available_features].replace([np.inf, -np.inf], np.nan).fillna(0)
-        y_reg_full = df_reg_clean['target_reg']
-        
-        # 簡單切分最近的資料集
-        test_size_reg = int(len(X_reg_full) * 0.1) if len(X_reg_full) < test_size * 2 else test_size
-        X_train_reg = X_reg_full.iloc[:-test_size_reg]
-        y_train_reg = y_reg_full.iloc[:-test_size_reg]
-        X_val_reg = X_reg_full.iloc[-test_size_reg:]
-        y_val_reg = y_reg_full.iloc[-test_size_reg:]
-
-        reg_model = xgb.XGBRegressor(
-            n_estimators=300,      
-            learning_rate=0.05,     
-            max_depth=6,            
-            tree_method='hist',     
-            random_state=42, 
-            n_jobs=-1
-        )
-        
-        reg_model.fit(X_train_reg, y_train_reg, eval_set=[(X_val_reg, y_val_reg)], verbose=False)
-        trend_model_path = f"model_trend_step_{day}.json"
-        reg_model.save_model(trend_model_path)
-    print(f"💾 7天走勢預測模型全數儲存完成！")
-
     # --- 效能測試報告 ---
     print(f"\n--- 🏁 最終效能盲測 (未來 {test_size} 筆數據) ---")
     y_pred = model.predict(X_test)
@@ -189,6 +171,19 @@ def train_brain():
     importance = pd.Series(model.feature_importances_, index=available_features).sort_values(ascending=False)
     print("\n🔥 特徵決策貢獻排行 Top 15 (請確認三大法人是否上榜)：")
     print(importance.head(15))
+
+    # 把特徵重要性存成 JSON，讓 API / 前端可以做「模型可解釋性」視覺化，不再只印在 log 裡
+    importance_output = {
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "accuracy": round(float(acc), 4),
+        "features": [
+            {"name": name, "importance": round(float(val), 6)}
+            for name, val in importance.head(15).items()
+        ]
+    }
+    with open("feature_importance.json", "w", encoding="utf-8") as f:
+        json.dump(importance_output, f, ensure_ascii=False, indent=2)
+    print("💾 特徵重要性已存至: feature_importance.json")
 
 if __name__ == "__main__":
     train_brain()

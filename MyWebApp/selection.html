@@ -1,0 +1,870 @@
+﻿<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProQuant AI - 選股中心</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <style>
+        /* 基礎設定與深色背景 */
+        body { margin: 0; padding: 0; background-color: #000000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; color: #ffffff; }
+        .app-container { width: 100%; max-width: 414px; height: 100vh; background-color: #121212; position: relative; display: flex; flex-direction: column; box-shadow: 0 0 20px rgba(255, 255, 255, 0.1); overflow: hidden; }
+        
+        /* 頂部 Header */
+        .header { padding: 15px 20px; background-color: #1e1e1e; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
+        .header-title { font-size: 18px; font-weight: bold; color: #e2e8f0; display: flex; align-items: center; gap: 10px; }
+        .header-title i { color: #38bdf8; }
+
+        /* 搜尋欄位與內容區樣式 */
+        .search-bar { flex: 1; background-color: #2a2a2a; border-radius: 20px; padding: 8px 15px; display: flex; align-items: center; gap: 10px; }
+        .search-bar input { background: transparent; border: none; color: white; outline: none; width: 100%; font-size: 14px; }
+        .content { flex: 1; overflow-y: auto; padding: 15px; padding-bottom: 80px; }
+        .content::-webkit-scrollbar { display: none; }
+        
+        /* 區塊標題樣式 */
+        .section-title { font-size: 16px; font-weight: bold; color: #a0a0a0; margin: 20px 0 10px 0; display: flex; align-items: center; justify-content: space-between; cursor: grab; }
+        .section-title:active { cursor: grabbing; color: #38bdf8; }
+        .section-title.first { margin-top: 5px; }
+        .section-badge { background-color: #334155; color: white; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+        
+        /* 拖曳手把樣式 */
+        .drag-handle { padding: 0 10px; color: #94a3b8; font-size: 18px; }
+
+        /* A區：策略選擇器（下拉選單） */
+        .strategy-select-wrap { margin-bottom: 4px; }
+        .strategy-select {
+            width: 100%;
+            background: linear-gradient(135deg, #4f46e5, #0ea5e9);
+            color: #fff;
+            border: none;
+            border-radius: 12px;
+            padding: 14px 40px 14px 15px;
+            font-size: 15px;
+            font-weight: bold;
+            appearance: none;
+            -webkit-appearance: none;
+            cursor: pointer;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            background-size: 20px;
+        }
+        .strategy-select option { background-color: #1e1e1e; color: #ffffff; font-weight: normal; }
+        .strategy-desc { font-size: 12px; color: #94a3b8; margin-top: 8px; padding-left: 2px; }
+
+        /* AI精選：全市場精選／我的關注股 分頁 */
+        .ai-picks-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+        .ai-picks-tab { flex: 1; text-align: center; padding: 8px 4px; border-radius: 8px; font-size: 12px; font-weight: bold; color: #94a3b8; background: #1e1e1e; border: 1px solid #333; cursor: pointer; }
+        .ai-picks-tab.active { color: #000; background: #38bdf8; border-color: #38bdf8; }
+
+        /* 我的關注股評分卡片（從AI分析頁搬過來的） */
+        .score-item { display: flex; flex-direction: column; padding: 12px 0; border-bottom: 1px solid #2a2a2a; cursor: pointer; }
+        .score-item:last-child { border-bottom: none; padding-bottom: 0; }
+        .score-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .stock-name { font-size: 16px; font-weight: bold; }
+        .stock-code { font-size: 12px; color: #a0a0a0; margin-left: 5px; }
+        .live-price { font-size: 13px; font-weight: bold; margin-left: 10px; color: #38bdf8; }
+        .score-value { font-size: 20px; font-weight: bold; }
+        .progress-bg { width: 100%; height: 6px; background-color: #333; border-radius: 3px; margin-bottom: 8px; overflow: hidden; }
+        .progress-fill { height: 100%; border-radius: 3px; transition: width 1s ease-in-out, background 0.5s ease; }
+        .score-footer { display: flex; justify-content: space-between; font-size: 12px; color: #a0a0a0; }
+        .sentiment-tag { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: bold; }
+
+        /* 骨架屏載入動畫，取代空白等待 */
+        @keyframes skeleton-pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+        .skeleton-block { background-color: #2a2a2a; border-radius: 6px; animation: skeleton-pulse 1.4s ease-in-out infinite; }
+        .skeleton-stock-card { background-color: #1e1e1e; border-radius: 12px; padding: 15px; margin-bottom: 12px; border: 1px solid #2a2a2a; }
+
+        /* B區：AI 精選結果列表 */
+        .stock-card { background-color: #1e1e1e; border-radius: 12px; padding: 15px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #2a2a2a; cursor: pointer; transition: all 0.2s ease; }
+        .stock-card:hover { border-color: #38bdf8; background-color: #252525; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(56, 189, 248, 0.15); }
+        .stock-card:active { transform: translateY(0); }
+        .stock-info .name-code { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+        .stock-info .name { font-size: 18px; font-weight: bold; }
+        .stock-info .code { font-size: 14px; color: #a0a0a0; }
+        .ai-tag { background-color: rgba(56, 189, 248, 0.1); color: #38bdf8; padding: 4px 8px; border-radius: 12px; font-size: 12px; display: inline-flex; align-items: center; gap: 5px; }
+        .stock-price { text-align: right; }
+        .stock-price .price { font-size: 20px; font-weight: bold; }
+        .stock-price .change { font-size: 13px; margin-top: 4px; }
+        .text-up { color: #ef4444; } .text-down { color: #22c55e; } .text-flat { color: #a0a0a0; }
+
+        /* C區：自選股專用設定 */
+        .card { background-color: #1e1e1e; border-radius: 12px; padding: 15px; margin-bottom: 15px; border: 1px solid #2a2a2a; }
+        .watchlist-grid { display: grid; grid-template-columns: 1fr 1fr 1.5fr; align-items: center; }
+        .watchlist-grid .left { text-align: left; }
+        .watchlist-grid .center { text-align: center; }
+        .watchlist-grid .right { text-align: right; }
+        .watchlist-header { font-size: 12px; color: #64748b; padding: 0 5px 10px 5px; border-bottom: 1px solid #2a2a2a; margin-bottom: 10px; }
+        .stock-item { padding: 12px 5px; border-bottom: 1px solid #2a2a2a; transition: 0.2s; }
+        .stock-item:hover { background-color: #252525; border-radius: 8px; }
+        .stock-item:last-child { border-bottom: none; padding-bottom: 0; }
+        .change-badge { display: inline-block; padding: 4px 8px; border-radius: 6px; font-weight: bold; min-width: 60px; text-align: center; }
+        .bg-up-light { background-color: rgba(239, 68, 68, 0.1); }
+        .bg-down-light { background-color: rgba(34, 197, 94, 0.1); }
+
+        /* 錯誤訊息區塊 */
+        .error-msg { background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; color: #f87171; padding: 15px; border-radius: 8px; text-align: center; font-size: 14px; }
+
+        /* 底部導覽列 */
+        .bottom-nav { position: absolute; bottom: 0; width: 100%; background-color: #1e1e1e; display: flex; justify-content: space-around; padding: 10px 0; border-top: 1px solid #333; z-index: 20; }
+        .nav-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px; color: #94a3b8; font-size: 12px; text-decoration: none; }
+        .nav-item.active { color: #38bdf8; text-shadow: 0 0 10px rgba(56, 189, 248, 0.5); }
+        .nav-item i { font-size: 20px; }
+        .nav-badge-dot { position: absolute; top: 0; left: 55%; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; border: 1.5px solid #1e1e1e; display: none; }
+        .nav-badge-dot.show { display: block; }
+        .header-badge-dot { position: absolute; top: -2px; right: -4px; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; border: 1.5px solid #1e1e1e; display: none; }
+        .header-badge-dot.show { display: block; }
+            .rip-btn { position: relative; overflow: hidden; }
+        .stock-ac-dropdown { position: absolute; top: 100%; left: 0; right: 0; background: #1e1e1e; border: 1px solid #333; border-radius: 8px; margin-top: 4px; max-height: 240px; overflow-y: auto; z-index: 50; }
+        .stock-ac-item { padding: 10px 14px; font-size: 13px; color: #e2e8f0; cursor: pointer; border-bottom: 1px solid #2a2a2a; display: flex; justify-content: space-between; gap: 10px; }
+        .stock-ac-item:last-child { border-bottom: none; }
+        .stock-ac-item:hover { background: #2a2a2a; }
+        .stock-ac-code { color: #64748b; font-size: 12px; white-space: nowrap; }
+        .rip-ink { position: absolute; border-radius: 50%; background: rgba(255,255,255,0.35); pointer-events: none; transform: scale(0); opacity: 0.6; transition: transform 0.55s ease, opacity 0.55s ease; }
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        <div class="header">
+            <div class="header-title"><i class="fas fa-search-dollar"></i> 選股中心</div>
+            <a href="profile.html" style="color: #a0a0a0; text-decoration: none; font-size: 18px; position: relative;"><i class="fas fa-user-circle"></i><span class="header-badge-dot" id="profileBadgeDot"></span></a>
+        </div>
+
+        <div class="content" id="selection-content">
+
+            <div style="margin-bottom: 15px;">
+                <div class="search-bar">
+                    <i class="fas fa-search" style="color: #a0a0a0; cursor: pointer;" onclick="runQuickSearch()"></i>
+                    <input type="text" id="quickSearchInput" placeholder="輸入股號後按 Enter，直接查看該股 AI 分析" onkeydown="if(event.key==='Enter') runQuickSearch()">
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 8px; margin-bottom: 15px;">
+                <button class="rip-btn" onclick="jumpToSection('strategy')" style="flex:1; background:#1e1e1e; border:1px solid #333; border-radius:8px; padding:8px 4px; color:#cbd5e1; font-size:12px; cursor:pointer;"><i class="fas fa-magnifying-glass-chart" style="color:#38bdf8; display:block; margin-bottom:3px;"></i>策略選擇器</button>
+                <button class="rip-btn" onclick="jumpToSection('ai-picks')" style="flex:1; background:#1e1e1e; border:1px solid #333; border-radius:8px; padding:8px 4px; color:#cbd5e1; font-size:12px; cursor:pointer;"><i class="fas fa-star" style="color:#facc15; display:block; margin-bottom:3px;"></i>AI精選</button>
+                <button class="rip-btn" onclick="jumpToSection('watchlist')" style="flex:1; background:#1e1e1e; border:1px solid #333; border-radius:8px; padding:8px 4px; color:#cbd5e1; font-size:12px; cursor:pointer;"><i class="fas fa-bookmark" style="color:#22c55e; display:block; margin-bottom:3px;"></i>我的自選股</button>
+            </div>
+            
+            <div class="drag-section" data-id="strategy">
+                <div class="section-title first">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <div class="section-badge"><i class="fas fa-magnifying-glass-chart"></i></div> 策略選擇器 <span id="scanUpdateTime" style="font-size: 11px; font-weight: normal; margin-left: 5px;"></span>
+                    </div>
+                    <i class="fas fa-bars drag-handle"></i>
+                </div>
+                <div class="strategy-select-wrap">
+                    <select id="strategySelect" class="strategy-select" onchange="loadStrategy(this.value)">
+                        <option value="bullish_ma" data-desc="站穩四均線強勢上揚">📈 多頭排列</option>
+                        <option value="w_bottom" data-desc="雙底成型剛突破頸線">📊 W底型態</option>
+                        <option value="golden_cross" data-desc="5日均線上穿20日均線">⭐ 黃金交叉</option>
+                        <option value="bollinger_breakout" data-desc="通道壓縮後帶量開口">↔️ 布林突破</option>
+                        <option value="cup_handle" data-desc="平滑杯底洗盤後突破">☕ 杯柄型態</option>
+                        <option value="macd_flip" data-desc="柱狀圖由負轉正">⚡ MACD翻紅</option>
+                        <option value="kd_golden_cross" data-desc="低檔區K線上穿D線">〰️ KD黃金交叉</option>
+                        <option value="volume_breakout" data-desc="價漲量增追價強">📶 量價齊揚</option>
+                        <option value="m_top" data-desc="雙頭跌破頸線，留意風險">⚠️ M頭示警</option>
+                    </select>
+                    <div id="strategyDesc" class="strategy-desc">站穩四均線強勢上揚</div>
+                </div>
+                <!-- 策略選擇器的結果顯示區 -->
+                <div id="strategyResultsContainer" style="margin-top: 10px;">
+                    <!-- 動態載入策略結果 -->
+                </div>
+            </div>
+
+            <div class="drag-section" data-id="ai-picks">
+                <div class="section-title">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <div class="section-badge"><i class="fas fa-star"></i></div> AI精選
+                    </div>
+                    <i class="fas fa-bars drag-handle"></i>
+                </div>
+                <div class="ai-picks-tabs">
+                    <div class="ai-picks-tab active" id="aiTabMarket" onclick="switchAiPicksTab('market')">全市場精選</div>
+                    <div class="ai-picks-tab" id="aiTabWatch" onclick="switchAiPicksTab('watch')">我的關注股</div>
+                </div>
+                <div id="aiSelectionContainer">
+                    <div class="skeleton-block" style="height:11px; width:60%; margin-bottom:10px;"></div>
+                    <div class="skeleton-stock-card"><div class="skeleton-block" style="height:16px; width:40%; margin-bottom:10px;"></div><div class="skeleton-block" style="height:12px; width:70%;"></div></div>
+                    <div class="skeleton-stock-card"><div class="skeleton-block" style="height:16px; width:40%; margin-bottom:10px;"></div><div class="skeleton-block" style="height:12px; width:70%;"></div></div>
+                    <div class="skeleton-stock-card"><div class="skeleton-block" style="height:16px; width:40%; margin-bottom:10px;"></div><div class="skeleton-block" style="height:12px; width:70%;"></div></div>
+                </div>
+                <div id="aiScoreContainer" class="card" style="display:none; margin-top:0;">
+                    <div style="text-align: center; color: #94a3b8; padding: 20px;"><i class="fas fa-spinner fa-spin"></i> 正在呼叫後端 AI 模型批量運算...</div>
+                </div>
+            </div>
+
+            <div class="drag-section" data-id="watchlist">
+                <div class="section-title">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <div class="section-badge"><i class="fas fa-bookmark"></i></div> 我的自選股
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <i class="fas fa-edit" id="editWatchlistBtn" onclick="toggleEditWatchlist()" style="font-size: 16px; cursor: pointer; transition: 0.2s; color: #a0a0a0;"></i>
+                        <i class="fas fa-bars drag-handle"></i>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="watchlist-header watchlist-grid">
+                        <span class="left">商品</span>
+                        <span class="center">趨勢</span>
+                        <span class="right">最新價/漲跌幅</span>
+                    </div>
+                    
+                    <div id="watchlistBody">
+                        <div class="skeleton-block" style="height:14px; width:100%; margin:10px 0;"></div>
+                        <div class="skeleton-block" style="height:14px; width:100%; margin:10px 0;"></div>
+                    </div>
+
+                    <div id="addStockContainer" style="display: none; text-align: center; margin-top: 15px; padding-top: 15px; border-top: 1px dashed #333;">
+                        <button onclick="addWatchlistStock()" class="rip-btn" style="background-color: #38bdf8; color: #000; border: none; border-radius: 6px; padding: 8px 16px; font-weight: bold; cursor: pointer; font-size: 14px;">
+                            <i class="fas fa-plus"></i> 新增股票
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="rip-btn" id="backToTopBtn" onclick="scrollToTop()" style="text-align:center; padding:14px; margin-top:10px; color:#94a3b8; font-size:13px; cursor:pointer; border-radius:8px;">
+                <i class="fas fa-arrow-up"></i> 回到最上層
+            </div>
+
+        </div>
+
+        <div class="bottom-nav">
+            <a href="dashboard.html" class="nav-item"><i class="fas fa-chart-line"></i><span>看盤</span></a>
+            <a href="selection.html" class="nav-item active"><i class="fas fa-search-dollar"></i><span>選股</span></a>
+            <a href="ai_analysis.html" class="nav-item"><i class="fas fa-microchip"></i><span>AI分析</span></a>
+            <a href="community.html" class="nav-item"><i class="fas fa-users"></i><span class="nav-badge-dot" id="communityBadgeDot"></span><span>社群</span></a>
+            <a href="education.html" class="nav-item"><i class="fas fa-book-open"></i><span>教學</span></a>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = "https://128gzb5evxna.shares.zrok.io";
+
+        // --- JWT Auth Interceptor ---
+        const originalFetch = window.fetch;
+        window.fetch = async function() {
+            let [resource, config] = arguments;
+            if(typeof resource === 'string' && resource.includes(API_BASE_URL)) {
+                config = config || {};
+                config.headers = config.headers || {};
+                config.headers['skip_zrok_interstitial'] = 'true';
+                const token = localStorage.getItem('access_token');
+                if (token) {
+                    config.headers['Authorization'] = 'Bearer ' + token;
+                }
+            }
+            const response = await originalFetch(resource, config);
+            if(response.status === 401 && !resource.includes('/api/auth/login') && !resource.includes('/api/auth/register')) {
+                alert('登入已過期或權限不足，請重新登入');
+                window.location.href = 'login.html';
+            }
+            return response;
+        };
+        // -----------------------------
+
+        // 產生骨架屏卡片，取代空白等待或單一 spinner，n = 要顯示幾張
+        function skeletonStockCards(n = 3) {
+            let html = '';
+            for (let i = 0; i < n; i++) {
+                html += `
+                    <div class="skeleton-stock-card">
+                        <div class="skeleton-block" style="height:16px; width:40%; margin-bottom:10px;"></div>
+                        <div class="skeleton-block" style="height:12px; width:70%;"></div>
+                    </div>`;
+            }
+            return html;
+        }
+
+        function jumpToSection(id) {
+            const el = document.querySelector(`[data-id="${id}"]`);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        function scrollToTop() {
+            const contentEl = document.getElementById('selection-content');
+            if (contentEl) contentEl.scrollTo({ top: 0, behavior: 'smooth' });
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function runQuickSearch() {
+            const input = document.getElementById('quickSearchInput');
+            const ticker = input.value.trim();
+            if (!ticker) return;
+            localStorage.setItem('lastViewedTicker', ticker);
+            window.location.href = `ai_analysis.html?ticker=${encodeURIComponent(ticker)}`;
+        }
+
+        function goToDashboard(ticker) {
+            localStorage.setItem("targetStockSymbol", ticker);
+            localStorage.setItem('lastViewedTicker', ticker);
+            window.location.href = `dashboard.html?symbol=${ticker}`;
+        }
+
+        async function loadStrategy(strategyName) {
+            // 更新下拉選單的描述文字
+            const selectEl = document.getElementById('strategySelect');
+            const descEl = document.getElementById('strategyDesc');
+            if (selectEl && descEl) {
+                selectEl.value = strategyName;
+                const selectedOption = selectEl.options[selectEl.selectedIndex];
+                descEl.innerText = selectedOption ? selectedOption.dataset.desc : '';
+            }
+
+            const container = document.getElementById('strategyResultsContainer');
+            const timeSpan = document.getElementById('scanUpdateTime'); // 若您將此 span 移至 A 區塊，否則可移除這行或將其加到 A 區塊標題
+            
+            container.innerHTML = skeletonStockCards(3);
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/screener/${strategyName}`);
+                const result = await response.json();
+                
+                if (result.status !== "success") {
+                    container.innerHTML = `<div class="error-msg"><b>伺服器訊息：</b><br>${result.message}</div>`;
+                    return;
+                }
+                
+                const data = result.data;
+                if (timeSpan) {
+                    timeSpan.innerText = `(更新於: ${result.updated_at})`;
+                }
+                
+                if (data.length === 0) {
+                    container.innerHTML = `<div style="text-align:center; padding:20px; color:#a0a0a0;">目前沒有符合此型態的股票。</div>`;
+                    return;
+                }
+                
+                container.innerHTML = '';
+                
+                data.forEach(item => {
+                    // 將型態理由作為副標題
+                    const html = `
+                    <div class="stock-card" onclick="goToDashboard('${item.ticker}')">
+                        <div class="stock-info" style="width: 100%;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                <div class="name-code"><span class="name">${item.name}</span> <span class="code">${item.ticker}</span></div>
+                                <div class="price text-up" style="font-size:18px; font-weight:bold;">${item.price.toFixed(2)}</div>
+                            </div>
+                            <div style="font-size: 13px; color: #a0a0a0; background-color: rgba(255,255,255,0.05); padding: 8px; border-radius: 6px; margin-top: 5px;">
+                                <i class="fas fa-info-circle" style="color:#38bdf8;"></i> ${item.reason}
+                            </div>
+                        </div>
+                    </div>`;
+                    container.innerHTML += html;
+                });
+            } catch (error) {
+                container.innerHTML = `<div class="error-msg"><b>無法連上伺服器取得策略結果</b></div>`;
+            }
+        }
+
+        // 「AI精選」＝ XGBoost 對全市場最新資料排名後的前 5 名（後端排程批次算好、寫入快取，
+        // 跟自選股/收藏完全無關，是 AI 主動幫你發掘的標的）
+        async function runAIStockScreener() {
+            const container = document.getElementById('aiSelectionContainer');
+            container.innerHTML = skeletonStockCards(3);
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/ai_top_picks`);
+                const result = await response.json();
+
+                if (result.status !== "success") {
+                    container.innerHTML = `<div class="error-msg"><b>伺服器訊息：</b><br>${result.message || '尚未部署AI精選功能，請稍後再試'}</div>`;
+                    return;
+                }
+
+                const scanResults = result.top_bullish || [];
+                container.innerHTML = `<div style="font-size:11px; color:#94a3b8; margin-bottom:10px;">全市場 ${result.scanned_count || '--'} 檔股票 XGBoost 排名，更新於: ${result.updated_at}</div>`;
+
+                if (scanResults.length === 0) {
+                    container.innerHTML += `<div style="text-align:center; padding:20px; color:#a0a0a0;">目前沒有可顯示的排名結果。</div>`;
+                    return;
+                }
+
+                scanResults.forEach(item => {
+                    const hasDiff = item.diff !== null && item.diff !== undefined;
+                    const priceClass = !hasDiff ? "text-flat" : (item.diff > 0 ? "text-up" : (item.diff < 0 ? "text-down" : "text-flat"));
+                    const sign = hasDiff && item.diff > 0 ? "+" : "";
+                    const tagColor = item.confidence >= 55 ? "#ef4444" : (item.confidence <= 45 ? "#22c55e" : "#38bdf8");
+                    const tagBg = item.confidence >= 55 ? "rgba(239, 68, 68, 0.1)" : (item.confidence <= 45 ? "rgba(34, 197, 94, 0.1)" : "rgba(56, 189, 248, 0.1)");
+
+                    const html = `
+                    <div class="stock-card" onclick="goToDashboard('${item.ticker}')">
+                        <div class="stock-info">
+                            <div class="name-code"><span class="name">${item.name}</span> <span class="code">${item.ticker}</span></div>
+                            <div class="ai-tag" style="color: ${tagColor}; background-color: ${tagBg};">
+                                <i class="fas fa-brain"></i> AI勝率 ${item.confidence}% | ${item.prediction}
+                            </div>
+                        </div>
+                        <div class="stock-price">
+                            <div class="price ${priceClass}">${item.price !== null ? item.price.toFixed(2) : '--'}</div>
+                            <div class="change ${priceClass}">${hasDiff ? `${sign}${item.diff.toFixed(2)} (${sign}${item.percent.toFixed(2)}%)` : '--'}</div>
+                        </div>
+                    </div>`;
+                    container.innerHTML += html;
+                });
+            } catch (error) {
+                container.innerHTML = `<div class="error-msg"><b>無法連上伺服器取得AI精選結果</b></div>`;
+            }
+        }
+
+        // ==========================================
+        // AI精選：全市場精選／我的關注股 分頁切換
+        // ==========================================
+        let aiScoresLoaded = false; // 「我的關注股」評分要打好幾支股票的AI預測，比較重，改成點到分頁才載入
+        function switchAiPicksTab(tab) {
+            const marketBox = document.getElementById('aiSelectionContainer');
+            const watchBox = document.getElementById('aiScoreContainer');
+            document.getElementById('aiTabMarket').classList.toggle('active', tab === 'market');
+            document.getElementById('aiTabWatch').classList.toggle('active', tab === 'watch');
+            marketBox.style.display = tab === 'market' ? 'block' : 'none';
+            watchBox.style.display = tab === 'watch' ? 'block' : 'none';
+            if (tab === 'watch' && !aiScoresLoaded) {
+                aiScoresLoaded = true;
+                loadAllAIScores();
+            }
+        }
+
+        // 「我的關注股」評分：抓你的收藏股，逐檔呼叫 AI 模型即時算分數（從AI分析頁搬過來的功能）
+        const DEFAULT_AI_WATCHLIST = ['2330', '2382', '2454']; // 尚未收藏任何股票時的示範清單
+
+        async function fetchFavoriteTickers() {
+            const token = localStorage.getItem('access_token');
+            if (!token) return [];
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/favorites`);
+                if (!res.ok) return [];
+                const data = await res.json();
+                return data.map(f => f.ticker);
+            } catch (err) {
+                console.error(err);
+                return [];
+            }
+        }
+
+        async function loadAllAIScores() {
+            const container = document.getElementById('aiScoreContainer');
+            container.innerHTML = '';
+
+            const favoriteTickers = await fetchFavoriteTickers();
+            const aiWatchlist = favoriteTickers.length > 0 ? favoriteTickers : DEFAULT_AI_WATCHLIST;
+
+            if (favoriteTickers.length === 0) {
+                container.innerHTML = `<div style="font-size:12px; color:#94a3b8; margin-bottom:10px;"><i class="fas fa-circle-info"></i> 您尚未收藏股票，先顯示範例，收藏後這裡會換成您的清單</div>`;
+            }
+
+            for (const ticker of aiWatchlist) {
+                const htmlStr = `
+                <div class="score-item" onclick="goToDashboard('${ticker}')">
+                    <div class="score-header">
+                        <div>
+                            <span class="stock-name" id="score-name-${ticker}">載入中</span><span class="stock-code">${ticker}</span>
+                            <span class="live-price" id="score-price-${ticker}">--</span>
+                        </div>
+                        <div class="score-value" id="score-val-${ticker}">
+                            <i class="fas fa-spinner fa-spin" style="font-size: 14px;"></i>
+                        </div>
+                    </div>
+                    <div class="progress-bg">
+                        <div class="progress-fill" id="score-bar-${ticker}" style="width: 0%; background: #333;"></div>
+                    </div>
+                    <div class="score-footer">
+                        <span id="score-reason-${ticker}">分析中...</span>
+                        <span class="sentiment-tag" id="score-tag-${ticker}">-</span>
+                    </div>
+                </div>`;
+                container.innerHTML += htmlStr;
+                fetchSingleScore(ticker);
+            }
+        }
+
+        async function fetchSingleScore(ticker) {
+            try {
+                const [stockRes, predRes] = await Promise.all([
+                    fetch(`${API_BASE_URL}/api/stock/${ticker}`),
+                    fetch(`${API_BASE_URL}/api/prediction/${ticker}`)
+                ]);
+
+                const stockData = (await stockRes.json()).data;
+                const predData = await predRes.json();
+
+                const lastPrice = stockData[stockData.length - 1].close_price;
+                document.getElementById(`score-name-${ticker}`).innerText = stockData[stockData.length - 1].stock_name || ticker;
+                document.getElementById(`score-price-${ticker}`).innerText = `$${lastPrice.toFixed(2)}`;
+
+                const conf = predData.confidence;
+                const valEl = document.getElementById(`score-val-${ticker}`);
+                const barEl = document.getElementById(`score-bar-${ticker}`);
+                const tagEl = document.getElementById(`score-tag-${ticker}`);
+
+                valEl.innerText = `${conf}%`;
+                barEl.style.width = `${conf}%`;
+                document.getElementById(`score-reason-${ticker}`).innerHTML = `<i class="fas fa-bolt"></i> 理由：${predData.message}`;
+
+                if (conf >= 55) {
+                    valEl.style.color = "#ef4444";
+                    barEl.style.background = "linear-gradient(90deg, #ef4444, #f87171)";
+                    tagEl.innerText = "偏多";
+                    tagEl.style.color = "#ef4444";
+                    tagEl.style.background = "rgba(239, 68, 68, 0.1)";
+                } else if (conf <= 45) {
+                    valEl.style.color = "#22c55e";
+                    barEl.style.background = "linear-gradient(90deg, #22c55e, #4ade80)";
+                    tagEl.innerText = "偏空";
+                    tagEl.style.color = "#22c55e";
+                    tagEl.style.background = "rgba(34, 197, 94, 0.1)";
+                } else {
+                    valEl.style.color = "#eab308";
+                    barEl.style.background = "linear-gradient(90deg, #eab308, #fde047)";
+                    tagEl.innerText = "震盪";
+                    tagEl.style.color = "#eab308";
+                    tagEl.style.background = "rgba(234, 179, 8, 0.1)";
+                }
+            } catch (error) {
+                console.error(`解析 ${ticker} 發生錯誤`, error);
+                document.getElementById(`score-val-${ticker}`).innerText = "失敗";
+            }
+        }
+
+
+        // 「我的自選股」現在跟「AI分析」頁的★收藏是同一份資料（後端 /api/favorites），
+        // 不再各自存一份 localStorage，收藏一次到處都看得到。
+        let myWatchlist = [];
+        let isEditingWatchlist = false;
+
+        async function loadWatchlistFromFavorites() {
+            const body = document.getElementById('watchlistBody');
+            const token = localStorage.getItem('access_token');
+            if (!token) {
+                myWatchlist = [];
+                body.innerHTML = '<div style="text-align: center; color: #64748b; padding: 15px;">請先登入才能查看與管理自選股</div>';
+                return;
+            }
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/favorites`);
+                const data = await res.json();
+                myWatchlist = data.map(f => ({ code: f.ticker, name: f.stock_name || f.ticker }));
+                renderWatchlist();
+            } catch (err) {
+                console.error(err);
+                body.innerHTML = '<div style="text-align: center; color: #64748b; padding: 15px;">載入自選股失敗，請檢查網路連線</div>';
+            }
+        }
+
+        function renderWatchlist() {
+            const body = document.getElementById('watchlistBody');
+            body.innerHTML = '';
+
+            if (myWatchlist.length === 0) {
+                body.innerHTML = '<div style="text-align: center; color: #64748b; padding: 15px;">目前無自選股，點右上角編輯圖示新增</div>';
+                return;
+            }
+
+            myWatchlist.forEach(stock => {
+                const ticker = stock.code;
+                body.innerHTML += `
+                <div class="stock-item watchlist-grid" ${isEditingWatchlist ? '' : `onclick="goToDashboard('${ticker}')" style="cursor: pointer;"`}>
+                    <div class="stock-info left">
+                        <div class="name" id="name-${ticker}" style="font-size: 16px; font-weight: bold; color: #e2e8f0;">${stock.name}</div>
+                        <div class="code" style="font-size: 12px; color: #64748b; margin-top: 2px;">${ticker}</div>
+                    </div>
+                    <div class="stock-trend center">
+                        <span class="change-badge" id="trend-${ticker}">--</span>
+                    </div>
+                    <div class="stock-price right">
+                        ${isEditingWatchlist ? 
+                            `<i class="fas fa-minus-circle" style="color: #ef4444; cursor: pointer; font-size: 20px; padding: 5px;" onclick="removeWatchlistStock('${ticker}', event)"></i>` :
+                            `<div class="price" id="price-${ticker}" style="font-size: 16px; font-weight: bold;">--</div><div class="change change-badge" id="change-${ticker}" style="font-size: 13px; margin-top: 2px;">--</div>`
+                        }
+                    </div>
+                </div>`;
+                
+                if (!isEditingWatchlist) {
+                    fetchWatchlistData(ticker);
+                }
+            });
+        }
+
+        function toggleEditWatchlist() {
+            isEditingWatchlist = !isEditingWatchlist;
+            const btn = document.getElementById('editWatchlistBtn');
+            const addContainer = document.getElementById('addStockContainer');
+            
+            if (isEditingWatchlist) {
+                btn.style.color = '#38bdf8';
+                addContainer.style.display = 'block';
+            } else {
+                btn.style.color = '#a0a0a0';
+                addContainer.style.display = 'none';
+            }
+            renderWatchlist();
+        }
+
+        async function removeWatchlistStock(ticker, event) {
+            if(event) event.stopPropagation();
+            try {
+                await fetch(`${API_BASE_URL}/api/favorites/${ticker}`, { method: 'DELETE' });
+                myWatchlist = myWatchlist.filter(s => s.code !== ticker);
+                renderWatchlist();
+            } catch (err) {
+                console.error(err);
+                alert('移除失敗，請稍後再試');
+            }
+        }
+
+        async function addWatchlistStock() {
+            const ticker = prompt("請輸入要新增的股票代碼 (例如: 2303):");
+            if (!ticker || ticker.trim() === '') return;
+
+            const cleanTicker = ticker.trim();
+            if (myWatchlist.find(s => s.code === cleanTicker)) {
+                alert("該股票已在自選股清單中！");
+                return;
+            }
+            try {
+                await fetch(`${API_BASE_URL}/api/favorites/${cleanTicker}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ stock_name: null })
+                });
+                myWatchlist.push({ code: cleanTicker, name: '載入中...' });
+                renderWatchlist();
+            } catch (err) {
+                console.error(err);
+                alert('新增失敗，請稍後再試');
+            }
+        }
+
+        async function fetchWatchlistData(ticker) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/stock/${ticker}`);
+                const result = await response.json();
+
+                if (result.data && result.data.length >= 2) {
+                    const dataArray = result.data;
+                    const latestData = dataArray[dataArray.length - 1];
+                    const prevData = dataArray[dataArray.length - 2];
+                    const latestPrice = latestData.close_price;
+                    const prevPrice = prevData.close_price;
+
+                    if (latestData.stock_name) {
+                        const stockIndex = myWatchlist.findIndex(s => s.code === ticker);
+                        if (stockIndex !== -1 && myWatchlist[stockIndex].name !== latestData.stock_name) {
+                            myWatchlist[stockIndex].name = latestData.stock_name;
+                            // 把股名同步回後端收藏紀錄，下次載入就不用再顯示「載入中...」
+                            fetch(`${API_BASE_URL}/api/favorites/${ticker}`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ stock_name: latestData.stock_name })
+                            }).catch(err => console.error(err));
+                        }
+                        const nameElement = document.getElementById(`name-${ticker}`);
+                        if (nameElement) nameElement.innerText = latestData.stock_name;
+                    }
+
+                    if(latestPrice === null || prevPrice === null) return;
+
+                    const diff = latestPrice - prevPrice;
+                    const percent = (diff / prevPrice) * 100;
+
+                    const priceElement = document.getElementById(`price-${ticker}`);
+                    const changeElement = document.getElementById(`change-${ticker}`);
+                    const trendElement = document.getElementById(`trend-${ticker}`); 
+                    
+                    if(priceElement) priceElement.innerText = latestPrice.toFixed(2);
+                    
+                    if (diff > 0) {
+                        if(priceElement) priceElement.className = "price text-up";
+                        if(changeElement) {
+                            changeElement.className = "change change-badge bg-up-light text-up";
+                            changeElement.innerText = `+${diff.toFixed(2)} (+${percent.toFixed(2)}%)`;
+                        }
+                        if(trendElement) {
+                            trendElement.innerText = "做多";
+                            trendElement.className = "change-badge bg-up-light text-up";
+                        }
+                    } else if (diff < 0) {
+                        if(priceElement) priceElement.className = "price text-down";
+                        if(changeElement) {
+                            changeElement.className = "change change-badge bg-down-light text-down";
+                            changeElement.innerText = `${diff.toFixed(2)} (${percent.toFixed(2)}%)`;
+                        }
+                        if(trendElement) {
+                            trendElement.innerText = "做空";
+                            trendElement.className = "change-badge bg-down-light text-down";
+                        }
+                    } else {
+                        if(priceElement) {
+                            priceElement.className = "price";
+                            priceElement.style.color = "#a0a0a0";
+                        }
+                        if(changeElement) {
+                            changeElement.className = "change change-badge";
+                            changeElement.style.backgroundColor = "#333";
+                            changeElement.style.color = "#a0a0a0";
+                            changeElement.innerText = `0.00 (0.00%)`;
+                        }
+                        if(trendElement) {
+                            trendElement.innerText = "觀望";
+                            trendElement.className = "change-badge";
+                            trendElement.style.backgroundColor = "#333";
+                            trendElement.style.color = "#a0a0a0";
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error(`無法取得 ${ticker} 的資料:`, error);
+                const priceElement = document.getElementById(`price-${ticker}`);
+                const nameElement = document.getElementById(`name-${ticker}`);
+                if (priceElement) priceElement.innerText = "查無資料";
+                if (nameElement) nameElement.innerText = "未知代碼";
+            }
+        }
+
+        // 統一的初始化
+        // 底部導覽列未讀紅點：比對後端資料是否有比「上次查看時間」更新的內容
+        async function checkBadgeStatus() {
+            const token = localStorage.getItem('access_token');
+            if (!token) return;
+
+            let communitySince = localStorage.getItem('community_badge_seen');
+            if (!communitySince) {
+                communitySince = new Date().toISOString();
+                localStorage.setItem('community_badge_seen', communitySince);
+            }
+            let repliesSince = localStorage.getItem('notif_badge_seen');
+            if (!repliesSince) {
+                repliesSince = new Date().toISOString();
+                localStorage.setItem('notif_badge_seen', repliesSince);
+            }
+
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/notifications/badge_status?community_since=${encodeURIComponent(communitySince)}&replies_since=${encodeURIComponent(repliesSince)}`);
+                const data = await res.json();
+                if (data.status !== 'success') return;
+
+                const communityDot = document.getElementById('communityBadgeDot');
+                if (communityDot) communityDot.classList.toggle('show', !!data.has_new_community_posts);
+
+                const profileDot = document.getElementById('profileBadgeDot');
+                if (profileDot) profileDot.classList.toggle('show', !!data.has_new_replies_to_me);
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            checkBadgeStatus();
+            // 1. 載入預設策略 (多頭排列) 在 A 區下方
+            loadStrategy('bullish_ma');
+            
+            // 2. 啟動 B 區的 XGBoost AI 精選（「我的關注股」分頁改成點到才載入，減少一進頁面的請求量）
+            runAIStockScreener();
+            setupStockAutocomplete('quickSearchInput', () => runQuickSearch());
+
+            // 3. 載入 C 區自選股（跟收藏共用同一份後端資料）
+            loadWatchlistFromFavorites();
+            
+            // 3. 初始化拖曳排序
+            const savedOrder = localStorage.getItem('selection_order');
+            const container = document.getElementById('selection-content');
+            
+            if (savedOrder && container) {
+                const orderArray = JSON.parse(savedOrder);
+                const sections = Array.from(container.querySelectorAll('.drag-section'));
+                
+                orderArray.forEach(id => {
+                    const section = sections.find(s => s.getAttribute('data-id') === id);
+                    if (section) container.appendChild(section);
+                });
+            }
+
+            // 「回到最上層」不參與拖曳排序，重新排序後強制把它固定在最後面
+            const backToTopBtn = document.getElementById('backToTopBtn');
+            if (container && backToTopBtn) container.appendChild(backToTopBtn);
+
+            if (container && typeof Sortable !== 'undefined') {
+                Sortable.create(container, {
+                    animation: 150,
+                    handle: '.section-title',
+                    filter: '#editWatchlistBtn',
+                    preventOnFilter: false,
+                    ghostClass: 'bg-up-light',
+                    onEnd: function () {
+                        const sections = Array.from(container.querySelectorAll('.drag-section'));
+                        const order = sections.map(s => s.getAttribute('data-id'));
+                        localStorage.setItem('selection_order', JSON.stringify(order));
+                        if (backToTopBtn) container.appendChild(backToTopBtn);
+                    }
+                });
+            }
+        });
+    </script>
+    <script>
+        document.addEventListener('click', function(e) {
+            const btn = e.target.closest('.rip-btn');
+            if (!btn) return;
+            const rect = btn.getBoundingClientRect();
+            const size = Math.max(rect.width, rect.height) * 2;
+            const ink = document.createElement('span');
+            ink.className = 'rip-ink';
+            ink.style.width = ink.style.height = size + 'px';
+            ink.style.left = (e.clientX - rect.left - size / 2) + 'px';
+            ink.style.top = (e.clientY - rect.top - size / 2) + 'px';
+            btn.appendChild(ink);
+            requestAnimationFrame(() => { ink.style.transform = 'scale(1)'; ink.style.opacity = '0'; });
+            setTimeout(() => ink.remove(), 600);
+        });
+    </script>
+    <script>
+        // 股票中文名稱／代碼搜尋自動完成，可套在任何 <input> 上
+        function setupStockAutocomplete(inputId, onSelect) {
+            const input = document.getElementById(inputId);
+            if (!input) return;
+            const parent = input.parentElement;
+            if (getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
+
+            const dropdown = document.createElement('div');
+            dropdown.className = 'stock-ac-dropdown';
+            dropdown.style.display = 'none';
+            parent.appendChild(dropdown);
+
+            let debounceTimer;
+            input.addEventListener('input', () => {
+                clearTimeout(debounceTimer);
+                const q = input.value.trim();
+                if (!q) { dropdown.style.display = 'none'; return; }
+                debounceTimer = setTimeout(async () => {
+                    try {
+                        const res = await fetch(`${API_BASE_URL}/api/search_stock?q=${encodeURIComponent(q)}`);
+                        const json = await res.json();
+                        const items = json.data || [];
+                        if (items.length === 0) { dropdown.style.display = 'none'; return; }
+                        dropdown.innerHTML = items.map(it => `<div class="stock-ac-item" data-ticker="${it.ticker}"><span>${it.name}</span><span class="stock-ac-code">${it.ticker}</span></div>`).join('');
+                        dropdown.style.display = 'block';
+                    } catch (err) {
+                        console.error(err);
+                    }
+                }, 300);
+            });
+
+            dropdown.addEventListener('mousedown', (e) => {
+                const item = e.target.closest('.stock-ac-item');
+                if (!item) return;
+                const ticker = item.dataset.ticker;
+                input.value = ticker;
+                dropdown.style.display = 'none';
+                if (onSelect) onSelect(ticker);
+            });
+
+            document.addEventListener('click', (e) => {
+                if (!parent.contains(e.target)) dropdown.style.display = 'none';
+            });
+        }
+    </script>
+</body>
+</html>

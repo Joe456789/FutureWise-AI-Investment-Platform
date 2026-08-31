@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProQuant AI 股市預測系統 - 註冊</title>
+    
+    <style>
+        body, html {
+            height: 100%;
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #0f172a;
+            position: relative;
+            overflow: hidden; 
+        }
+
+        .bg-wrapper {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: url('https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?q=80&w=2070&auto=format&fit=crop');
+            background-size: cover;
+            background-position: center;
+            transform: scaleX(-1);
+            z-index: 1;
+        }
+
+        .register-container {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+            padding: 30px 40px;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            width: 350px;
+            color: white;
+            text-align: center;
+            position: absolute;
+            top: 5%; 
+            left: 10%;  
+            z-index: 10; 
+        }
+
+        .register-container h2 {
+            margin-bottom: 5px;
+            font-size: 26px;
+            letter-spacing: 1px;
+            color: #38bdf8;
+            text-transform: uppercase;
+        }
+
+        .input-group {
+            margin-bottom: 15px;
+            text-align: left;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 13px;
+            color: #cbd5e1;
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #475569;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            color: white;
+            box-sizing: border-box;
+            outline: none;
+        }
+
+        .register-btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #10b981, #059669);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+
+        .back-link {
+            margin-top: 20px;
+            font-size: 14px;
+        }
+
+        .back-link a {
+            color: #94a3b8;
+            text-decoration: none;
+        }
+            .rip-btn { position: relative; overflow: hidden; }
+        .rip-ink { position: absolute; border-radius: 50%; background: rgba(255,255,255,0.35); pointer-events: none; transform: scale(0); opacity: 0.6; transition: transform 0.55s ease, opacity 0.55s ease; }
+    </style>
+</head>
+<body>
+    <div class="bg-wrapper"></div>
+
+    <div class="register-container">
+        <h2>建立帳號</h2>
+        <p>請填寫基本資料完成註冊</p>
+
+        <form id="registerForm">
+            <div class="input-group">
+                <label for="reg-username">Account (設定帳號)</label>
+                <input type="text" id="reg-username" placeholder="請輸入帳號" required>
+            </div>
+            <div class="input-group">
+                <label for="reg-password">Password (設定密碼)</label>
+                <input type="password" id="reg-password" placeholder="請設定密碼" required>
+            </div>
+            <div class="input-group">
+                <label for="reg-name">Full Name (姓名)</label>
+                <input type="text" id="reg-name" placeholder="您的真實姓名" required>
+            </div>
+            <div class="input-group">
+                <label for="reg-phone">Phone (聯絡電話 - 重要！)</label>
+                <input type="tel" id="reg-phone" placeholder="找回密碼需使用此電話" required>
+            </div>
+            <button type="button" class="register-btn rip-btn" onclick="handleRegister()">完成註冊</button>
+            
+            <div class="back-link">
+                <a href="login.html">← 返回登入頁面</a>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        function handleRegister() {
+            const username = document.getElementById('reg-username').value;
+            const pass = document.getElementById('reg-password').value;
+            const name = document.getElementById('reg-name').value;
+            const phone = document.getElementById('reg-phone').value;
+
+            if (!username || !pass || !name || !phone) {
+                alert('請填寫完整資訊！');
+                return;
+            }
+
+            const API_BASE_URL = "https://128gzb5evxna.shares.zrok.io";
+
+        // --- Zrok 攔截頁繞過 + JWT Auth Interceptor ---
+        const originalFetch = window.fetch;
+        window.fetch = async function() {
+            let [resource, config] = arguments;
+            if(typeof resource === 'string' && resource.includes(API_BASE_URL)) {
+                config = config || {};
+                config.headers = config.headers || {};
+                config.headers['skip_zrok_interstitial'] = 'true';
+                const token = localStorage.getItem('access_token');
+                if (token) {
+                    config.headers['Authorization'] = 'Bearer ' + token;
+                }
+            }
+            return originalFetch(resource, config);
+        };
+        // -----------------------------
+            
+            fetch(API_BASE_URL + '/api/auth/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: username, password: pass, name: name, phone: phone })
+            })
+            .then(res => res.json().then(data => ({status: res.status, body: data})))
+            .then(result => {
+                if (result.status === 200) {
+                    alert('註冊成功！請返回登入。');
+                    window.location.href = 'login.html';
+                } else {
+                    alert('註冊失敗：' + (result.body.detail || '發生錯誤'));
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                alert('連線伺服器失敗，請稍後再試。');
+            });
+        }
+        
+    </script>
+    <script>
+        document.addEventListener('click', function(e) {
+            const btn = e.target.closest('.rip-btn');
+            if (!btn) return;
+            const rect = btn.getBoundingClientRect();
+            const size = Math.max(rect.width, rect.height) * 2;
+            const ink = document.createElement('span');
+            ink.className = 'rip-ink';
+            ink.style.width = ink.style.height = size + 'px';
+            ink.style.left = (e.clientX - rect.left - size / 2) + 'px';
+            ink.style.top = (e.clientY - rect.top - size / 2) + 'px';
+            btn.appendChild(ink);
+            requestAnimationFrame(() => { ink.style.transform = 'scale(1)'; ink.style.opacity = '0'; });
+            setTimeout(() => ink.remove(), 600);
+        });
+    </script>
+</body>
+</html>

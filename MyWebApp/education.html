@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProQuant AI - 投資教學中心</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* 基礎設定與深色背景 */
+        body { margin: 0; padding: 0; background-color: #000000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; color: #ffffff; }
+        .app-container { width: 100%; max-width: 414px; height: 100vh; background-color: #121212; position: relative; display: flex; flex-direction: column; box-shadow: 0 0 20px rgba(255, 255, 255, 0.05); overflow: hidden; }
+
+        /* 頂部 Header */
+        .header { padding: 15px 20px; background-color: #1a1a1a; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #2a2a2a; z-index: 10; }
+        .header-title { font-size: 18px; font-weight: bold; color: #e2e8f0; display: flex; align-items: center; gap: 10px; }
+        .header-title i { color: #38bdf8; }
+
+        /* 主要內容區 */
+        .content { flex: 1; overflow-y: auto; padding: 15px; padding-bottom: 80px; }
+        .content::-webkit-scrollbar { display: none; }
+
+        .section-title { font-size: 15px; font-weight: bold; color: #a0a0a0; margin: 15px 0 10px 0; display: flex; align-items: center; gap: 8px; }
+
+        /* AI 專屬閱讀路徑 */
+        .ai-path-card { background: linear-gradient(135deg, #1e1b4b, #312e81); border-radius: 12px; padding: 16px; margin-bottom: 20px; border: 1px solid #4338ca; }
+        .ai-path-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .ai-path-subtitle { font-size: 13px; color: #c7d2fe; display: flex; align-items: center; gap: 6px; }
+        .ai-path-progress { font-size: 12px; color: #a5b4fc; }
+        .ai-path-title { font-size: 18px; font-weight: bold; color: #ffffff; margin-bottom: 12px; }
+        .progress-bar-bg { width: 100%; height: 6px; background-color: rgba(0, 0, 0, 0.4); border-radius: 3px; margin-bottom: 15px; }
+        .progress-bar-fill { height: 100%; width: 65%; background: linear-gradient(90deg, #38bdf8, #818cf8); border-radius: 3px; }
+        .continue-btn { background-color: #4f46e5; color: white; border: none; padding: 10px 15px; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; transition: 0.2s; }
+        .continue-btn:active { transform: scale(0.98); }
+
+        /* 文章分類標籤 */
+        .category-scroll { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 5px; margin-bottom: 15px; }
+        .category-scroll::-webkit-scrollbar { display: none; }
+        .category-tag { background-color: transparent; border: 1px solid #444; color: #a0a0a0; padding: 6px 14px; border-radius: 20px; font-size: 13px; white-space: nowrap; cursor: pointer; transition: 0.2s; }
+        .category-tag.active { border-color: #38bdf8; color: #38bdf8; background-color: rgba(56, 189, 248, 0.1); }
+
+        /* 最新精選文章清單 */
+        .article-card { background-color: #1a1a1a; border-radius: 12px; padding: 15px; margin-bottom: 12px; border: 1px solid #2a2a2a; display: flex; gap: 12px; cursor: pointer; transition: 0.2s; }
+        .article-card:active { transform: scale(0.98); background-color: #222; }
+        
+        .article-icon-box { width: 50px; height: 50px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
+        .icon-blue { background: rgba(56, 189, 248, 0.1); color: #38bdf8; }
+        .icon-green { background: rgba(34, 197, 94, 0.1); color: #22c55e; }
+        .icon-purple { background: rgba(192, 132, 252, 0.1); color: #c084fc; }
+        .icon-yellow { background: rgba(250, 204, 21, 0.1); color: #facc15; }
+        .icon-red { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+        .icon-orange { background: rgba(251, 146, 60, 0.1); color: #fb923c; }
+        .icon-teal { background: rgba(20, 184, 166, 0.1); color: #14b8a6; }
+
+        .article-info { flex: 1; display: flex; flex-direction: column; justify-content: space-between; }
+        .article-title { font-size: 15px; font-weight: bold; color: #e2e8f0; margin-bottom: 4px; line-height: 1.3; }
+        .article-desc { font-size: 12px; color: #94a3b8; margin-bottom: 8px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        
+        /* 標籤難易度專屬顏色 */
+        .article-meta { display: flex; align-items: center; gap: 10px; font-size: 11px; }
+        .meta-badge { padding: 2px 6px; border-radius: 4px; border: 1px solid; font-weight: bold; }
+        .badge-intro { color: #22c55e; border-color: rgba(34, 197, 94, 0.4); background: rgba(34, 197, 94, 0.1); }  /* 入門: 綠色 */
+        .badge-must { color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.1); }   /* 必讀: 藍色 */
+        .badge-action { color: #ef4444; border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.1); } /* 實戰: 紅色 */
+        .badge-adv { color: #f97316; border-color: rgba(249, 115, 22, 0.4); background: rgba(249, 115, 22, 0.1); }    /* 進階: 橘色 */
+        .meta-time { color: #94a3b8; display: flex; align-items: center; gap: 4px; }
+
+        /* 底部導覽列 */
+        .bottom-nav { position: absolute; bottom: 0; width: 100%; background-color: #1a1a1a; display: flex; justify-content: space-around; padding: 10px 0; border-top: 1px solid #2a2a2a; z-index: 5; }
+        .nav-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px; color: #94a3b8; font-size: 12px; text-decoration: none; }
+        .nav-item.active { color: #38bdf8; text-shadow: 0 0 10px rgba(56, 189, 248, 0.5); }
+        .nav-badge-dot { position: absolute; top: 0; left: 55%; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; border: 1.5px solid #1e1e1e; display: none; }
+        .nav-badge-dot.show { display: block; }
+        .header-badge-dot { position: absolute; top: -2px; right: -4px; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; border: 1.5px solid #1e1e1e; display: none; }
+        .header-badge-dot.show { display: block; }
+
+        /* === 文章閱讀彈出視窗 (Modal) === */
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(0, 0, 0, 0.8); z-index: 100; display: flex; justify-content: center; align-items: flex-end; opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
+        .modal-overlay.active { opacity: 1; pointer-events: auto; }
+        
+        .modal-content { background-color: #121212; width: 100%; max-width: 414px; height: 90vh; border-radius: 20px 20px 0 0; display: flex; flex-direction: column; transform: translateY(100%); transition: transform 0.3s ease; box-shadow: 0 -5px 25px rgba(0,0,0,0.5); border-top: 1px solid #333; }
+        .modal-overlay.active .modal-content { transform: translateY(0); }
+
+        .modal-header { padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #2a2a2a; background-color: #1a1a1a; border-radius: 20px 20px 0 0; }
+        .modal-tag { font-size: 12px; color: #38bdf8; background: rgba(56,189,248,0.1); padding: 4px 10px; border-radius: 12px; font-weight: bold; }
+        .close-btn { background: none; border: none; color: #a0a0a0; font-size: 20px; cursor: pointer; padding: 5px; }
+        
+        .modal-body { flex: 1; overflow-y: auto; padding: 20px; color: #cbd5e1; font-size: 15px; line-height: 1.8; }
+        .modal-body::-webkit-scrollbar { display: none; }
+        .m-title { font-size: 22px; font-weight: bold; color: #fff; margin-bottom: 15px; line-height: 1.3; }
+        
+        /* 內文排版樣式 */
+        .content-box { background: #1a1a1a; padding: 15px; border-radius: 10px; margin-bottom: 15px; border: 1px solid #2a2a2a; border-left: 3px solid #38bdf8; }
+        .content-box.red-line { border-left-color: #ef4444; }
+        .content-box.green-line { border-left-color: #22c55e; }
+        .content-h3 { color: #38bdf8; font-size: 16px; margin: 0 0 10px 0; }
+        .highlight { color: #facc15; font-weight: bold; }
+        .text-up { color: #ef4444; font-weight: bold; }
+        .text-down { color: #22c55e; font-weight: bold; }
+        ul.custom-list { padding-left: 20px; margin-top: 5px; margin-bottom: 0; }
+        ul.custom-list li { margin-bottom: 8px; }
+            .rip-btn { position: relative; overflow: hidden; }
+        .rip-ink { position: absolute; border-radius: 50%; background: rgba(255,255,255,0.35); pointer-events: none; transform: scale(0); opacity: 0.6; transition: transform 0.55s ease, opacity 0.55s ease; }
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        <div class="header">
+            <div class="header-title"><i class="fas fa-book-open"></i> 投資教學中心</div>
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <i class="fas fa-search" id="searchToggleBtn" style="color: #a0a0a0; font-size: 18px; cursor: pointer;" onclick="toggleSearchBox()"></i>
+                <a href="profile.html" style="color: #a0a0a0; text-decoration: none; font-size: 18px; position: relative;"><i class="fas fa-user-circle"></i><span class="header-badge-dot" id="profileBadgeDot"></span></a>
+            </div>
+        </div>
+
+        <div class="content">
+            <div id="searchBox" style="display: none; margin-bottom: 15px;">
+                <input type="text" id="articleSearchInput" placeholder="搜尋所有分類的文章標題或摘要..."
+                    oninput="runArticleSearch(this.value)"
+                    style="width: 100%; box-sizing: border-box; padding: 10px 14px; border-radius: 20px; border: 1px solid #333; background-color: #1a1a1a; color: white; outline: none; font-size: 14px;">
+            </div>
+            <div class="section-title"><i class="fas fa-route"></i> 我的閱讀進度</div>
+            <div class="ai-path-card">
+                <div class="ai-path-header">
+                    <div class="ai-path-subtitle" id="readingSubtitle"><i class="fas fa-robot"></i> 載入中...</div>
+                    <div class="ai-path-progress" id="readingProgressText"></div>
+                </div>
+                <div class="ai-path-title" id="readingNextTitle"></div>
+                <div class="progress-bar-bg"><div class="progress-bar-fill" id="readingProgressBar" style="width: 0%;"></div></div>
+                <button class="continue-btn" id="readingContinueBtn" style="display:none;"><i class="fas fa-book-reader"></i> 繼續閱讀</button>
+            </div>
+
+            <div class="section-title"><i class="fas fa-tags"></i> 文章分類</div>
+            <div class="category-scroll" id="categoryTabs">
+                <div class="category-tag active" data-category="fundamental">基本面</div>
+                <div class="category-tag" data-category="chips">籌碼面解析</div>
+                <div class="category-tag" data-category="tech">技術分析</div>
+                <div class="category-tag" data-category="macro">總體經濟</div>
+                <div class="category-tag" data-category="psychology">交易心法</div>
+            </div>
+
+            <div class="section-title"><i class="fas fa-file-alt"></i> 最新精選文章</div>
+            <div id="article-list"></div>
+        </div>
+
+        <div class="bottom-nav">
+            <a href="dashboard.html" class="nav-item"><i class="fas fa-chart-line"></i><span>看盤</span></a>
+            <a href="selection.html" class="nav-item"><i class="fas fa-search-dollar"></i><span>選股</span></a>
+            <a href="ai_analysis.html" class="nav-item"><i class="fas fa-microchip"></i><span>AI分析</span></a>
+            <a href="community.html" class="nav-item"><i class="fas fa-users"></i><span class="nav-badge-dot" id="communityBadgeDot"></span><span>社群</span></a>
+            <a href="education.html" class="nav-item active"><i class="fas fa-book-open"></i><span>教學</span></a>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="articleModal" onclick="closeModalOnBg(event)">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-tag" id="modalTag">分類標籤</div>
+                <button class="close-btn" onclick="closeModal()"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="m-title" id="modalTitle">文章標題</div>
+                <div id="modalContent"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const articleDatabase = {
+            fundamental: [
+                { id: "f1", title: "財報三劍客：EPS、本益比、股價淨值比", desc: "買股票就是投資公司，教你用最基礎的財報數字評估股票價值。", iconClass: "icon-green", icon: "fa-file-invoice-dollar", badge: "入門", badgeClass: "badge-intro", time: "5 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">1. EPS (每股盈餘)</h3>EPS 代表「公司幫你手上的每一股賺了多少錢」。EPS 越高越好，且要觀察是否穩定成長。</div><div class="content-box"><h3 class="content-h3">2. 本益比 (PE Ratio)</h3>公式：股價 / EPS。代表「買進這檔股票，幾年才能回本」。</div><div class="content-box"><h3 class="content-h3">3. 股價淨值比 (PB Ratio)</h3>公式：股價 / 每股淨值。用來看公司是否跌破清算價值。通常 PB < 1 代表股價極度便宜。</div>` },
+                { id: "f2", title: "存股族必看：殖利率與配息率的陷阱", desc: "高股息不等於穩賺不賠！教你看懂配發邏輯，避開賺股息賠價差。", iconClass: "icon-blue", icon: "fa-piggy-bank", badge: "入門", badgeClass: "badge-intro", time: "6 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">殖利率 (Dividend Yield)</h3>公式：現金股利 / 股價。留意高殖利率陷阱！如果股價暴跌，殖利率會異常高，重點是要確認公司有「填息」的能力。</div><div class="content-box"><h3 class="content-h3">配息率 (Payout Ratio)</h3>公式：現金股利 / EPS。代表公司願意拿多少比例發現金。<span class="highlight">注意：若配息率 > 100%，代表公司在吃老本發錢</span>，對長期發展非常不利。</div>` },
+                { id: "f6", title: "真金白銀的考驗：自由現金流 (FCF)", desc: "公司真的有賺到錢嗎？教你看透帳面獲利與實際現金的落差。", iconClass: "icon-green", icon: "fa-money-bill-wave", badge: "入門", badgeClass: "badge-intro", time: "5 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">自由現金流 (Free Cash Flow)</h3>公式：營業現金流 - 資本支出。代表公司支付完所有維持營運必要的開銷後，<span class="highlight">真正可以自由運用的現金</span>。</div><div class="content-box"><h3 class="content-h3">為何比 EPS 更重要？</h3>很多公司 EPS 很高，但錢全卡在存貨或應收帳款，甚至要一直借錢擴廠。自由現金流長期為正，才是真正能發放股利且度過寒冬的優質企業。</div>` },
+                { id: "f3", title: "找飆股的先行指標：月營收與EPS成長率", desc: "股價發動的終極引擎！教你提早卡位業績大爆發的成長股。", iconClass: "icon-red", icon: "fa-rocket", badge: "必讀", badgeClass: "badge-must", time: "6 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">月營收年增率 (YoY)</h3>每月 10 號前公布。如果發現「月營收創歷史新高」且「年增率(YoY) 大幅轉正」，這是業績爆發的<span class="text-up">最強先行指標</span>。</div><div class="content-box"><h3 class="content-h3">EPS 成長率</h3>單看 EPS 高不夠，重點是「成長率」。EPS 雖然只有 2 元但比去年成長 100% 的公司，股價爆發力遠大於 EPS 10 元但零成長的公司。</div>` },
+                { id: "f7", title: "成長股估值神器：PEG 指標", desc: "買高本益比的股票一定危險嗎？大師彼得林區最愛的估值法。", iconClass: "icon-blue", icon: "fa-chart-pie", badge: "必讀", badgeClass: "badge-must", time: "6 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">本益成長比 (PEG)</h3>公式：本益比 (PE) / 盈餘成長率。用來衡量一檔股票的「本益比」是否符合它的「成長性」。</div><div class="content-box"><h3 class="content-h3">如何判讀？</h3><ul class="custom-list"><li><b>PEG < 1：</b>股價被低估（例如 PE 20 倍，但成長率高達 30%）。</li><li><b>PEG = 1：</b>估值合理。</li><li><b>PEG > 1：</b>股價可能已被高估，需留意追高風險。</li></ul></div>` },
+                { id: "f8", title: "營運效率的照妖鏡：存貨與應收帳款周轉率", desc: "產品賣不出去？客戶欠錢不還？兩大指標幫你抓出營運死角。", iconClass: "icon-orange", icon: "fa-boxes", badge: "必讀", badgeClass: "badge-must", time: "7 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">存貨周轉率</h3>衡量公司賣庫存的速度。如果存貨周轉率突然<span class="text-down">大幅下降</span>，代表產品滯銷，未來可能面臨提列跌價損失的風險。</div><div class="content-box"><h3 class="content-h3">應收帳款周轉率</h3>衡量公司收回貨款的速度。數字越高，代表客戶付款越快，發生呆帳的機率越低。</div>` },
+                { id: "f13", title: "升息環境的防護罩：利息保障倍數", desc: "借錢投資不可怕，怕的是付不出利息！防範企業黑天鵝的關鍵。", iconClass: "icon-blue", icon: "fa-file-invoice", badge: "必讀", badgeClass: "badge-must", time: "6 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">利息保障倍數</h3>公式：稅前息前利潤 (EBIT) / 利息費用。代表公司賺來的營業利潤，夠支付幾次的利息。</div><div class="content-box"><h3 class="content-h3">安全標準</h3>在升息循環中，企業借款成本會大幅上升。一般建議該倍數至少要 <span class="highlight">大於 5 倍</span>，若低於 2 倍，代表賺來的錢光繳利息就快沒了，財務極度脆弱。</div>` },
+                { id: "f4", title: "避開地雷股：看懂流動比與負債比", desc: "買股票最怕公司倒閉或下市，兩大財務安全指標教你掃雷。", iconClass: "icon-teal", icon: "fa-shield-alt", badge: "實戰", badgeClass: "badge-action", time: "6 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">流動比率 (Current Ratio)</h3>公式：流動資產 / 流動負債。衡量「短期還債能力」。若低於 100%，代表短期內要還的錢大於手上的現金，隨時有跳票危機！</div><div class="content-box"><h3 class="content-h3">負債比率 (Debt Ratio)</h3>一般企業負債比 > 60% 算偏高。但「金融業」與「營建業」的負債比天生就很高，不能與電子股放在一起比較。</div>` },
+                { id: "f9", title: "嚴苛的財務底線：速動比率", desc: "比流動比率更嚴謹！當危機發生時，公司能不能瞬間變現還債。", iconClass: "icon-red", icon: "fa-bolt", badge: "實戰", badgeClass: "badge-action", time: "5 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">速動比率 (Quick Ratio)</h3>公式：(流動資產 - 存貨 - 預付費用) / 流動負債。</div><div class="content-box"><h3 class="content-h3">與流動比率的差異</h3>因為「存貨」在急難時通常很難馬上賣掉換現金，因此速動比率將存貨剔除，是最嚴格的短期償債能力測試。<span class="highlight">一般建議速動比率 > 100% 較為安全。</span></div>` },
+                { id: "f10", title: "盈餘品質指標：營業現金流對淨利比", desc: "公司有沒有在財報上灌水作假帳？一秒鐘戳破虛假的獲利。", iconClass: "icon-teal", icon: "fa-search-dollar", badge: "實戰", badgeClass: "badge-action", time: "8 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">盈餘品質如何看？</h3>公式：營業現金流 / 稅後淨利。這個比率用來檢視帳面上的「淨利」有多少是真正收進來的「現金」。</div><div class="content-box"><h3 class="content-h3">警訊與地雷</h3>如果公司連年獲利大增，但這個比率卻<span class="text-down">小於 100% 甚至為負數</span>，代表賺的都是紙上富貴（如暴增的應收帳款），極有可能是作假帳的財報地雷！</div>` },
+                { id: "f12", title: "未來的成長引擎：資本支出 (CAPEX)", desc: "捨得花錢才能賺大錢！看懂台積電等科技巨頭的護城河秘密。", iconClass: "icon-yellow", icon: "fa-hammer", badge: "實戰", badgeClass: "badge-action", time: "7 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">什麼是資本支出？</h3>公司為了購買機器設備、建廠房等長期資產所花的錢。雖然這會吃掉眼前的自由現金流，但對於半導體或製造業來說，這是<span class="text-up">維持未來競爭力的必要投資</span>。</div><div class="content-box"><h3 class="content-h3">CAPEX 循環</h3>當一家公司在低谷期依然逆勢大幅拉高資本支出，通常代表管理層看到未來龐大的訂單需求，往往是長線大爆發的前兆。</div>` },
+                { id: "f5", title: "獲利能力解密：三率三升與 ROE、ROA", desc: "找出真正的護城河！看懂毛利率、營業利益率與稅後淨利率的連動。", iconClass: "icon-yellow", icon: "fa-gem", badge: "進階", badgeClass: "badge-adv", time: "8 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">什麼是「三率三升」？</h3><ul class="custom-list"><li><b>毛利率：</b>代表產品競爭力與定價權。</li><li><b>營業利益率：</b>扣除管理與行銷費後的本業賺錢效率。</li><li><b>稅後淨利率：</b>加上業外收益、扣完稅的最終利潤。</li></ul></div><div class="content-box"><h3 class="content-h3">ROE 與 ROA</h3><b>ROE(股東權益報酬率)</b>是大師巴菲特最愛，衡量拿股東的錢賺錢的效率。<b>ROA(資產報酬率)</b>則包含負債。若 ROE 極高但 ROA 很低，代表是靠高槓桿(借錢)衝出來的獲利，風險較高。</div>` },
+                { id: "f11", title: "解構獲利來源：杜邦分析法", desc: "ROE 很高就是好公司？拆解 ROE 的三大引擎，看透獲利本質。", iconClass: "icon-purple", icon: "fa-project-diagram", badge: "進階", badgeClass: "badge-adv", time: "9 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">杜邦分析的三大引擎</h3>將 ROE 拆解為三個部分相乘：<br><b>ROE = 淨利率 × 總資產周轉率 × 權益乘數(槓桿)</b></div><div class="content-box"><h3 class="content-h3">找出 ROE 上升的真相</h3><ul class="custom-list"><li>如果是靠<b>淨利率</b>提升，代表產品附加價值變高（極佳）。</li><li>如果是靠<b>周轉率</b>提升，代表管理效率變好（佳）。</li><li>如果是靠<b>權益乘數</b>提升，代表是靠大量借錢撐出來的（風險高）。</li></ul></div>` },
+                { id: "f14", title: "業績的隱形王牌：合約負債", desc: "明明是負債，為何數字暴增反而股價大漲？設備與軟體股的必看指標。", iconClass: "icon-red", icon: "fa-file-signature", badge: "進階", badgeClass: "badge-adv", time: "8 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">什麼是合約負債？</h3>也就是以前稱的「預收帳款」。客戶因為急著要產品，先付給公司的訂金。在會計原則上，還沒交貨前只能記為負債。</div><div class="content-box"><h3 class="content-h3">最強烈的業績先行指標</h3>這筆錢「遲早會變成營收」。當發現一家營建股、設備廠或軟體公司的合約負債<span class="text-up">創下歷史新高</span>，代表手握滿滿的未實現訂單，未來的財報絕對非常亮眼！</div>` },
+                { id: "f15", title: "科技股的護城河：研發費用率", desc: "為什麼有些公司不賺錢股價卻一直創高？看懂研發投入的長尾效應。", iconClass: "icon-purple", icon: "fa-flask", badge: "進階", badgeClass: "badge-adv", time: "7 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">研發費用率</h3>公式：研發費用 / 總營收。對於科技股、生技股或 IC 設計公司來說，沒有持續的研發就沒有未來的產品。</div><div class="content-box"><h3 class="content-h3">護城河指標</h3>當一家公司的研發費用率穩定維持在同業之上（例如 IC 設計業常見的 15%~20%），代表它不斷在墊高技術門檻，對手極難跨越，這類公司通常享有更高的<span class="highlight">市場本益比估值</span>。</div>` }
+            ],
+            chips: [
+                { id: "c1", title: "三大法人解析：外資、投信、自營商", desc: "市場的造浪者！了解三大法人的習性，跟著大資金順勢而為。", iconClass: "icon-blue", icon: "fa-building", badge: "入門", badgeClass: "badge-intro", time: "7 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">外資、投信、自營商</h3><ul class="custom-list"><li><b>外資：</b>資金雄厚，看重總經與匯率。偏好「大型權值股」，決定台股大盤方向。</li><li><b>投信：</b>國內基金公司，有績效壓力，極度偏好炒作<span class="highlight">中小型爆發股</span>。</li><li><b>自營商：</b>券商自有資金，多為極短線操作或避險。</li></ul></div>` },
+                { id: "c5", title: "內部人的秘密：董監事與大股東持股", desc: "公司好不好，老闆最知道！看懂內部人持股比例的增減。", iconClass: "icon-green", icon: "fa-user-tie", badge: "入門", badgeClass: "badge-intro", time: "6 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">董監持股比例</h3>通常董監持股越高，代表管理層與股東利益一致，公司相對穩健。</div><div class="content-box"><h3 class="content-h3">內部人申報轉讓</h3>如果發現董事長或大股東突然「申報轉讓」大量股票，通常是高檔套現的危險訊號，股價容易面臨大跌。</div>` },
+                { id: "c6", title: "公司派的宣示：庫藏股機制", desc: "為什麼公司要花錢買自家股票？帶你了解庫藏股背後的真正涵義。", iconClass: "icon-teal", icon: "fa-box-open", badge: "入門", badgeClass: "badge-intro", time: "5 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">實施庫藏股的目的</h3>通常是為了「維護公司信用與股東權益」或是「轉讓給員工」。當股價跌深時實施，代表公司派認為<span class="text-up">股價被嚴重委屈</span>。</div><div class="content-box"><h3 class="content-h3">陷阱與盲點</h3>要注意公司過去的「執行率」！有些公司只是喊喊口號做護盤假動作，最終根本沒買半張。</div>` },
+                { id: "c2", title: "主力 vs. 散戶：籌碼集中的博弈", desc: "誰在默默吃貨？誰在被割韭菜？教你看出籌碼流向。", iconClass: "icon-red", icon: "fa-users", badge: "必讀", badgeClass: "badge-must", time: "8 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">籌碼集中度</h3>如果一檔股票的「買家券商家數 < 賣家券商家數」，代表多數散戶在賣，少數大戶(主力)在默默收購，這就是標準的<span class="text-up">底部吃貨型態</span>，未來上漲機率極高。</div>` },
+                { id: "c7", title: "季底的狂歡：投信作帳與結帳行情", desc: "抓準投信的績效壓力，在每季季末跟著大哥吃香喝辣！", iconClass: "icon-orange", icon: "fa-chart-pie", badge: "必讀", badgeClass: "badge-must", time: "7 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">作帳行情 (每季中下旬)</h3>投信為了拚季底或年底的基金績效，會集中火力拉抬特定持股，此時跟單容易享受到快速飆升的快感。</div><div class="content-box"><h3 class="content-h3">結帳行情 (每季末)</h3>當目標達成或大勢不妙時，投信會提早<span class="text-down">反手倒貨獲利了結</span>。若發現投信由買轉賣且高檔爆量，切勿留戀！</div>` },
+                { id: "c8", title: "股權分散表：千張大戶與百張散戶", desc: "每週一次的籌碼體檢！一眼看穿股票到底是流向大戶還是散戶手中。", iconClass: "icon-blue", icon: "fa-layer-group", badge: "必讀", badgeClass: "badge-must", time: "8 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">千張大戶持股比例</h3>代表有錢人或大型機構的動向。大戶持股持續增加，代表籌碼集中，易漲難跌。</div><div class="content-box"><h3 class="content-h3">大戶與散戶的死亡交叉</h3>如果一檔股票「大戶持股持續減少」但「小於百張的散戶持股持續增加」，這就是典型的<span class="text-down">主力出貨給散戶</span>，是中長線崩盤的起點。</div>` },
+                { id: "c9", title: "關鍵風向球：外資期貨未平倉量", desc: "不只看現貨！外資在期貨市場的佈局，才是決定台股大盤生死的關鍵。", iconClass: "icon-purple", icon: "fa-globe-asia", badge: "必讀", badgeClass: "badge-must", time: "6 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">外資期貨多空單</h3>外資的期貨部位通常是大盤方向的領先指標。如果外資現貨買超，但期貨卻<span class="text-down">大幅佈局空單</span>，這往往是「拉高出貨」的避險動作。</div>` },
+                { id: "c3", title: "信用交易密碼：融資、融券與券資比", desc: "散戶的反指標！看懂借錢買股與借股放空的籌碼戰。", iconClass: "icon-orange", icon: "fa-user-ninja", badge: "實戰", badgeClass: "badge-action", time: "8 分鐘閱讀", content: `<div class="content-box red-line"><h3 class="content-h3" style="color: #ef4444;">融資餘額 (散戶指標)</h3>融資是借錢買股。當股價在高檔且「融資餘額暴增」，代表車上充滿想賺快錢的散戶。<span class="highlight">主力最愛在此時惡意洗盤</span>，是短線危險訊號。</div><div class="content-box green-line"><h3 class="content-h3" style="color: #22c55e;">融券與券資比 (軋空燃料)</h3>如果一檔強勢股的 券資比 > 30%（空單很多），股價卻跌不下去，就會引發恐怖的<span class="text-up">軋空行情</span>！放空者被迫高價買回股票，成為推升股價的燃料。</div>` },
+                { id: "c10", title: "國家隊進場：八大官股行庫護盤密碼", desc: "股市大跌時的定海神針，跟著國家隊撿便宜的勝率有多高？", iconClass: "icon-red", icon: "fa-university", badge: "實戰", badgeClass: "badge-action", time: "7 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">八大官股的習性</h3>官股行庫最大的特色就是「買黑賣紅」。當外資大舉提款、台股重挫時，官股通常會進場承接權值股護盤。</div><div class="content-box"><h3 class="content-h3">跟單策略</h3>官股買進不代表馬上會漲，他們是「越跌越買」的左側交易。可以觀察官股<span class="highlight">連續買超且股價不再破底</span>時，再進場佈局。</div>` },
+                { id: "c11", title: "隱藏的空軍：借券賣出與借券餘額", desc: "比融券更可怕的外資空單！看懂借券市場，避開外資的惡意狙擊。", iconClass: "icon-teal", icon: "fa-arrow-trend-down", badge: "實戰", badgeClass: "badge-action", time: "8 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">借券賣出餘額</h3>外資與法人的專屬做空工具。如果發現一檔股票的「借券賣出餘額」屢創新高，代表法人極度看壞後市，<span class="text-down">隨時可能出現暴跌</span>。</div><div class="content-box"><h3 class="content-h3">借券還券行情</h3>當高位的借券餘額開始大幅減少（外資還券），就等於空單回補，容易形成一波強勁的反彈行情。</div>` },
+                { id: "c12", title: "抓出控盤黑手：主力成本線與均價", desc: "主力也是要賺錢的！算出主力的持倉成本，把防守線設在最安全的地方。", iconClass: "icon-yellow", icon: "fa-calculator", badge: "實戰", badgeClass: "badge-action", time: "9 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">區間主力成本</h3>統計過去一段盤整時間內，買超最多券商的平均買進價格。只要股價<span class="text-up">維持在主力成本之上</span>，代表主力還處於獲利狀態，隨時可能繼續發動。</div><div class="content-box"><h3 class="content-h3">跌破成本的停損</h3>如果股價無量跌破主力成本線，且主力開始反手賣出，代表黑手已經放棄防守，這時務必果斷停損。</div>` },
+                { id: "c4", title: "看透特殊主力：隔日沖與地緣券商", desc: "為什麼股票昨天漲停今天卻大跌？帶你抓出背後的特殊主力。", iconClass: "icon-purple", icon: "fa-user-secret", badge: "進階", badgeClass: "badge-adv", time: "7 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">隔日沖大戶 (快閃主力)</h3>某些分點專門在尾盤砸大錢把股價拉漲停。隔天一早開高時，他們就會<span class="text-down">把昨天買的股票全部倒出來</span>。發現籌碼全是隔日沖，隔天切勿盲目追高！</div><div class="content-box"><h3 class="content-h3">地緣券商 (春江水暖鴨先知)</h3>如果一家位在台南的上市工業公司，突然被「台南當地的某幾家小券商」瘋狂買進，很可能是公司高層掌握了<span class="text-up">內部極大利多</span>，正在提早卡位吃貨。</div>` },
+                { id: "c13", title: "券商分點追蹤法：抓出囤貨的關鍵主力", desc: "找出隱身在茫茫券商中的大鱷！單一分點異常買超的背後含義。", iconClass: "icon-blue", icon: "fa-search-location", badge: "進階", badgeClass: "badge-adv", time: "9 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">異常買超分點</h3>一檔平常成交量很小的股票，突然連續幾天被「單一或少數幾個券商分點」狂買，這絕對是<span class="highlight">知情人士在提早佈局</span>。</div><div class="content-box"><h3 class="content-h3">囤貨型主力</h3>這種主力有別於隔日沖，他們會花幾週甚至幾個月耐心吃貨，把籌碼鎖死。一旦他們發動，通常就是數倍的大波段行情。</div>` },
+                { id: "c14", title: "籌碼背離戰法：看懂價量與籌碼的謊言", desc: "股價創新高但主力卻在跑？教你識破最高階的誘多與誘空陷阱。", iconClass: "icon-red", icon: "fa-theater-masks", badge: "進階", badgeClass: "badge-adv", time: "10 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">高檔誘多 (股價創高，籌碼發散)</h3>股價突破前高，散戶瘋狂追價，但「主力買賣超」卻是負的，且「大戶持股比例」下降。這是主力利用技術面利多<span class="text-down">逢高出貨</span>的陷阱。</div><div class="content-box"><h3 class="content-h3">低檔誘空 (股價破底，籌碼集中)</h3>股價跌破支撐，散戶恐慌停損，但特定分點卻在底下瘋狂吸籌碼。一旦洗盤結束，隨之而來的就是猛烈的 V 型反轉。</div>` }
+            ],
+            tech: [
+                { id: "t1", title: "基礎動能：K線與成交量", desc: "技術分析的基石，看懂價量關係就贏了一半。", iconClass: "icon-red", icon: "fa-chart-bar", badge: "入門", badgeClass: "badge-intro", time: "5 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">K線與影線</h3><ul class="custom-list"><li><b>長上影線：</b>代表上方<span class="text-down">賣壓沉重</span>。</li><li><b>長下影線：</b>代表下方<span class="text-up">支撐強勁</span>。</li></ul></div><div class="content-box"><h3 class="content-h3">量價關係</h3>量增價漲是最健康的趨勢；但如果在高檔爆量收黑，則是主力出貨的危險訊號！</div>` },
+                { id: "t7", title: "劃出關鍵防線：支撐與壓力", desc: "找出股價的樓地板與天花板，判斷進出場最安全的點位。", iconClass: "icon-green", icon: "fa-layer-group", badge: "入門", badgeClass: "badge-intro", time: "6 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">支撐 (Support)</h3>股價跌到某個價位就跌不下去，彷彿有買盤在防守的「樓地板」。買在支撐附近是最安全的佈局方式。</div><div class="content-box"><h3 class="content-h3">壓力 (Resistance)</h3>股價漲到某個價位就過不去，因為有套牢賣壓在等著解套的「天花板」。<span class="highlight">一旦突破壓力，壓力就會轉換成未來的支撐！</span></div>` },
+                { id: "t8", title: "順勢而為：畫出完美的趨勢線", desc: "上升趨勢與下降趨勢怎麼看？一條線決定你的多空方向。", iconClass: "icon-blue", icon: "fa-pen-ruler", badge: "入門", badgeClass: "badge-intro", time: "5 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">上升趨勢線</h3>將股價的「兩個波段低點」連成一條向上的斜線。只要股價在線上方運行，趨勢就偏多；一旦<span class="text-down">跌破趨勢線</span>，就是多單撤退的訊號。</div><div class="content-box"><h3 class="content-h3">下降趨勢線</h3>將「兩個波段高點」連成的向下斜線。突破下降趨勢線，往往是行情發動的第一道曙光。</div>` },
+                { id: "t2", title: "趨勢之王：移動平均線 (MA)", desc: "5MA、20MA怎麼看？教你掌握均線多頭排列。", iconClass: "icon-blue", icon: "fa-chart-line", badge: "必讀", badgeClass: "badge-must", time: "6 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">均線意義</h3><ul class="custom-list"><li><b>5MA / 10MA (短線)：</b>飆股沿著 5MA 衝。</li><li><b>20MA (月線)：</b>中波段生命線，跌破代表趨勢轉弱。</li><li><b>60MA (季線)：</b>長線多空的分水嶺。</li></ul></div><div class="content-box"><h3 class="content-h3">多頭排列</h3>5MA > 10MA > 20MA > 60MA 且全數向上，這是最強勢的發動型態！</div>` },
+                { id: "t9", title: "強勢表態：跳空缺口理論", desc: "為什麼股票會突然跳空？看懂突破缺口與竭盡缺口的密碼。", iconClass: "icon-red", icon: "fa-bolt", badge: "必讀", badgeClass: "badge-must", time: "7 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">突破缺口</h3>經過長時間盤整後，突然帶量向上跳空，這通常是主力發動攻擊的最強訊號！只要缺口不被回補，行情就能持續。</div><div class="content-box"><h3 class="content-h3">竭盡缺口</h3>股價已經大漲了一段時間，最後突然又出現跳空急拉，隨後開始爆量收黑。<span class="text-down">這往往是最後一棒的煙火，隨時面臨反轉。</span></div>` },
+                { id: "t10", title: "多空轉折：黃金交叉與死亡交叉", desc: "兩條均線的碰撞！最經典的買賣訊號與勝率提升法。", iconClass: "icon-orange", icon: "fa-times", badge: "必讀", badgeClass: "badge-must", time: "6 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">黃金交叉 (做多)</h3>短期均線（如 5MA）由下往上穿過長期均線（如 20MA）。如果此時兩條均線都<span class="text-up">同步向上彎</span>，買進勝率極高。</div><div class="content-box"><h3 class="content-h3">死亡交叉 (做空/停損)</h3>短期均線由上往下穿過長期均線。若伴隨高檔爆量，是強烈的賣出警告。</div>` },
+                { id: "t11", title: "提早抓轉折：價量背離的警訊", desc: "股價創高但量能退潮？教你避開假突破與真跌破的陷阱。", iconClass: "icon-purple", icon: "fa-eye-slash", badge: "必讀", badgeClass: "badge-must", time: "8 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">量價背離現象</h3>正常的上漲應該是「價漲量增」。如果發現股價「創下新高」，但成交量卻「明顯萎縮」，代表追價意願不足，這就是<span class="text-down">價量背離</span>，隨時可能反轉向下！</div>` },
+                { id: "t3", title: "軌道學：布林通道 (Bollinger Bands)", desc: "掌握股價震盪的上下限，抓出「開布林」的飆股。", iconClass: "icon-orange", icon: "fa-arrows-alt-v", badge: "實戰", badgeClass: "badge-action", time: "7 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">最強戰法：帶量開布林</h3>當股票盤整很久，上下軌距「極度壓縮」時，突然股價<span class="text-up">帶量突破上軌</span>，且上下軌同時向外擴張（像喇叭口），這是極強烈的飆股起漲訊號，應該順勢追進！</div>` },
+                { id: "t4", title: "趨勢動能判別：DMI 與 BIAS 乖離率", desc: "進階操盤手必備！看透趨勢是否成型，以及股價是否偏離合理值。", iconClass: "icon-yellow", icon: "fa-tachometer-alt", badge: "實戰", badgeClass: "badge-action", time: "9 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">DMI (動向指數)</h3><ul class="custom-list"><li><b>買進：</b>+DI 向上交叉穿過 -DI。</li><li><b>趨勢確認：</b>ADX <span class="highlight">大於 25 且持續上升</span>，代表趨勢強勁。若在低檔代表盤整爛盤。</li></ul></div><div class="content-box"><h3 class="content-h3">BIAS (乖離率)</h3>正乖離過大會有<span class="text-down">拉回修正壓力</span>；負乖離過大則醞釀<span class="text-up">報復性反彈</span>。</div>` },
+                { id: "t12", title: "經典型態學：頭肩底與頭肩頂", desc: "勝率最高的底部與頭部型態，教你算出目標價與停損點。", iconClass: "icon-teal", icon: "fa-mountain", badge: "實戰", badgeClass: "badge-action", time: "8 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">頭肩底 (做多型態)</h3>由三個低點組成，中間最低(頭部)，兩側較高(左肩、右肩)。當股價帶量<span class="text-up">突破頸線</span>時，等幅測距目標價 = 頸線 + (頸線到頭部的距離)。</div><div class="content-box"><h3 class="content-h3">頭肩頂 (逃命型態)</h3>出現在高檔的強烈看跌訊號。一旦有效跌破頸線，通常代表多頭徹底結束，請務必停損離場。</div>` },
+                { id: "t13", title: "築底與做頭：W底與M頭防線", desc: "打第二隻腳的威力！實戰中最常見的反轉型態解析。", iconClass: "icon-yellow", icon: "fa-magnet", badge: "實戰", badgeClass: "badge-action", time: "7 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">W底 (雙重底)</h3>股價兩次跌到同一位置都獲得支撐，形成英文字母 W 的形狀。買點通常設在突破 W 中間的高點（頸線）時，或是突破後回測頸線不破的時機。</div><div class="content-box"><h3 class="content-h3">M頭 (雙重頂)</h3>股價兩次挑戰同一高點失敗，形成字母 M。這是高檔派發的特徵，<span class="text-down">跌破 M 字中央低點即宣告成型</span>。</div>` },
+                { id: "t14", title: "順勢交易最高境界：亞當理論", desc: "翻箱體的對稱學！教你預測飆股噴發的終極目標價。", iconClass: "icon-red", icon: "fa-clone", badge: "實戰", badgeClass: "badge-action", time: "9 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">亞當理論的核心</h3>不要預設立場，市場是最真實的。最核心的操作就是「第二買點」與「翻箱體」。</div><div class="content-box"><h3 class="content-h3">等幅對稱 (翻箱體)</h3>當股價強勢突破一個長期的整理區間(箱體)時，未來的目標價通常等於<span class="highlight">突破點加上箱體的高度</span>。這能幫你在飆股發動時抱得住波段。</div>` },
+                { id: "t5", title: "中長波段神器：MACD 指標", desc: "判斷波段趨勢最強的指標，抓出起漲點與反轉背離。", iconClass: "icon-teal", icon: "fa-chart-area", badge: "進階", badgeClass: "badge-adv", time: "7 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">MACD 柱狀體</h3>當綠柱縮短到極致，<span class="text-up">剛轉為第一根紅柱</span>時，是波段起漲最佳上車點。</div><div class="content-box"><h3 class="content-h3">MACD 頂背離 (逃命訊號)</h3>股價創新高，但 MACD 紅柱卻「一波比一波低」，代表動能枯竭，隨時會發生<span class="text-down">深度回檔</span>！</div>` },
+                { id: "t6", title: "短線測溫計：KD 與 RSI 指標", desc: "抓超買超賣的神器，適合用來找極短線的轉折點。", iconClass: "icon-purple", icon: "fa-wave-square", badge: "進階", badgeClass: "badge-adv", time: "8 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">KD 隨機指標</h3><ul class="custom-list"><li><b>< 20 超賣區：</b>短線跌深反彈買點。</li><li><b>高檔鈍化：</b>KD 維持在 80 以上降不下來，代表<span class="highlight">買盤極度強勢(飆股)</span>，勿放空！</li></ul></div><div class="content-box"><h3 class="content-h3">RSI 相窗強弱</h3>當股價殺到支撐且 RSI 跌破 30(嚴重超賣)，通常很快會迎來強烈技術性反彈。</div>` },
+                { id: "t15", title: "推演大波段：艾略特波浪理論", desc: "上升五波與下跌三波！掌握大盤與個股的長期生命週期。", iconClass: "icon-blue", icon: "fa-water", badge: "進階", badgeClass: "badge-adv", time: "10 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">八波段循環</h3>完整的行情包含「推動浪五波 (1, 2, 3, 4, 5)」與「修正浪三波 (A, B, C)」。</div><div class="content-box"><h3 class="content-h3">最甜美的第三波</h3>通常「第 3 波」是整個上升趨勢中漲幅最大、爆發力最強的主升段，懂得判斷波浪位置，就能把資金重壓在最有效率的地方。</div>` },
+                { id: "t16", title: "極短線狙擊：威廉指標 (W%R)", desc: "比 KD 指標更敏銳！當沖與隔日沖高手愛用的抓轉折神器。", iconClass: "icon-orange", icon: "fa-crosshairs", badge: "進階", badgeClass: "badge-adv", time: "7 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">指標特性</h3>威廉指標 (Williams %R) 是一個反向指標，數值在 0 到 -100 之間。它對行情的敏感度遠大於 KD，非常適合用在急拉或急殺的盤勢中。</div><div class="content-box"><h3 class="content-h3">實戰運用</h3>當 W%R 觸及 0 (極度超買)，代表短線可能過熱；當觸及 -100 (極度超賣) 後<span class="text-up">開始向上勾頭</span>，往往就是絕佳的極短線搶反彈時機。</div>` }
+            ],
+            macro: [
+                { id: "m1", title: "市場情緒溫度計：VIX 恐慌指數", desc: "別人在恐懼我貪婪？教你用 VIX 指數尋找股市的絕佳買點。", iconClass: "icon-red", icon: "fa-chart-pie", badge: "入門", badgeClass: "badge-intro", time: "5 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">VIX 指數判讀</h3>VIX 反映了投資人的「恐慌程度」。當 VIX 飆破 30 甚至 40 時，往往代表<span class="highlight">非理性的殺盤已經到底</span>，這時候勇敢進場「撿屍」，常常能買在波段最低點！</div>` },
+                { id: "m2", title: "就業數據：非農就業人口與失業率", desc: "每月初重頭戲！影響美國聯準會降息意願的最關鍵數據。", iconClass: "icon-green", icon: "fa-users", badge: "入門", badgeClass: "badge-intro", time: "6 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">非農就業數據 (NFP)</h3>如果非農數據大幅低於預期(就業市場冷卻)，聯準會就會增加「降息」機率，股市反而容易上漲（壞消息變好消息）。若失業率快速攀升，則可能觸發經濟衰退的強烈訊號。</div>` },
+                { id: "m7", title: "國家賺錢了嗎？看懂 GDP 與經濟成長率", desc: "一國經濟的終極成績單，搞懂 GDP 如何牽動長期股市走向。", iconClass: "icon-blue", icon: "fa-globe", badge: "入門", badgeClass: "badge-intro", time: "5 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">GDP (國內生產毛額)</h3>衡量一個國家在一定時間內生產的商品與服務總值。GDP 持續成長代表國家經濟繁榮，企業獲利自然會跟著上升。</div><div class="content-box"><h3 class="content-h3">技術性衰退</h3>當一個國家的 GDP <span class="text-down">連續兩個季度呈現負成長</span>，在經濟學上就會被定義為「技術性衰退」，這時股市通常會面臨較大的估值修正壓力。</div>` },
+                { id: "m8", title: "市場的印鈔機：認識央行與貨幣政策", desc: "股市的資金潮水誰說了算？帶你認識決定熱錢流向的終極莊家。", iconClass: "icon-yellow", icon: "fa-money-bill-wave", badge: "入門", badgeClass: "badge-intro", time: "6 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">中央銀行的角色</h3>央行是「銀行的銀行」，主要目標是控制通膨與最大化就業。他們透過調整利率與印鈔票(貨幣政策)來控制市場上的資金多寡。</div><div class="content-box"><h3 class="content-h3">寬鬆 vs 緊縮</h3><span class="text-up">寬鬆政策(印鈔、降息)：</span>資金變多，股市容易大漲。<br><span class="text-down">緊縮政策(收回資金、升息)：</span>借錢成本變高，資金從股市撤退。</div>` },
+                { id: "m9", title: "認識三大央行：Fed, ECB, BOJ 及其影響力", desc: "美、歐、日央行的政策如何牽動全球股匯市的大亂鬥。", iconClass: "icon-purple", icon: "fa-landmark", badge: "入門", badgeClass: "badge-intro", time: "7 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">美國聯準會 (Fed)</h3>全球金融市場的老大。美元是世界貨幣，Fed 的決策直接決定了全球資金的流向。</div><div class="content-box"><h3 class="content-h3">歐洲(ECB)與日本(BOJ)</h3>日本央行(BOJ)長期維持超低利率，讓投資人習慣借便宜的日圓去買其他國家的資產(利差交易)。一旦 BOJ 宣布升息，這股熱錢就會被嚇跑，引發全球股市劇烈震盪。</div>` },
+                { id: "m3", title: "降息與升息：聯準會 (Fed) 的金錢遊戲", desc: "總體經濟最重要的一堂課，資金的潮水決定了股市的榮枯。", iconClass: "icon-purple", icon: "fa-hand-holding-usd", badge: "必讀", badgeClass: "badge-must", time: "10 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">升息 vs. 降息</h3><ul class="custom-list"><li><b>升息：</b>資金從股市撤出存回銀行，對科技股是<span class="text-down">重大利空</span>。</li><li><b>降息：</b>借錢變便宜，熱錢大量湧入股市，迎來<span class="text-up">資金大多頭行情</span>。</li></ul></div>` },
+                { id: "m4", title: "無風險利率之母：美國10年期公債殖利率", desc: "科技股的照妖鏡！看懂美債殖利率為何能讓股市大地震。", iconClass: "icon-blue", icon: "fa-file-invoice-dollar", badge: "必讀", badgeClass: "badge-must", time: "8 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">資產定價的錨 (Risk-Free Rate)</h3>公債被視為最安全的投資。如果美債殖利率飆高，資金就會大量拋售高風險的資產(尤其是高本益比科技股)轉向買債。因此，<span class="text-down">美債殖利率狂飆，通常伴隨著股市的暴跌。</span></div>` },
+                { id: "m10", title: "Fed 最看重的通膨指標：PCE 物價指數", desc: "比 CPI 更精準！聯準會制定利率政策時真正盯著的數據。", iconClass: "icon-teal", icon: "fa-shopping-basket", badge: "必讀", badgeClass: "badge-must", time: "8 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">個人消費支出物價指數 (PCE)</h3>不同於 CPI 固定一籃子商品，PCE 會根據消費者「替代消費」的行為做動態調整（例如豬肉變貴改買雞肉），更能真實反映民眾感受到的通膨壓力。</div><div class="content-box"><h3 class="content-h3">核心 PCE (Core PCE)</h3>剔除波動極大的「能源」與「食品」價格。<span class="highlight">Fed 長期的目標是將核心 PCE 控制在 2% 左右。</span></div>` },
+                { id: "m11", title: "經濟衰退預警器：殖利率曲線倒掛", desc: "歷史上準確率極高的風暴前兆，當長短期利率發生錯亂時。", iconClass: "icon-red", icon: "fa-exclamation-triangle", badge: "必讀", badgeClass: "badge-must", time: "9 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">什麼是倒掛？</h3>正常情況下，長期公債(如10年期)的殖利率應該大於短期公債(如2年期)，因為鎖錢時間長風險較高。當<span class="text-down">短債殖利率超越長債</span>時，就稱為倒掛。</div><div class="content-box"><h3 class="content-h3">為什麼危險？</h3>這代表市場極度看壞未來的經濟前景，預期央行未來將被迫大幅降息來救經濟。歷史經驗顯示，倒掛發生後的 12~18 個月內，極容易爆發經濟衰退。</div>` },
+                { id: "m12", title: "資金流向總指揮：美元指數 (DXY)", desc: "美元強，新興市場就遭殃？搞懂美元霸權對台股的絕對影響力。", iconClass: "icon-green", icon: "fa-dollar-sign", badge: "必讀", badgeClass: "badge-must", time: "7 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">美元指數 (DXY)</h3>衡量美元對一籃子主要貨幣（歐元、日圓等）的強弱。美元是全球避險資金的首選。</div><div class="content-box"><h3 class="content-h3">對台股的影響</h3><span class="text-down">美元極度強勢時</span>：外資會賣掉台股，換成美元匯回美國，台股容易遭遇無情提款。<br><span class="text-up">美元偏弱時</span>：熱錢會流向亞洲等新興市場尋求高報酬，台股容易上演資金噴發行情。</div>` },
+                { id: "m13", title: "台灣專屬紅綠燈：景氣對策信號", desc: "國發會每月公布的股市密碼，教你如何「藍燈買進、紅燈賣出」。", iconClass: "icon-orange", icon: "fa-traffic-light", badge: "必讀", badgeClass: "badge-must", time: "8 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">景氣燈號含義</h3><ul class="custom-list"><li><span style="color:#ef4444;font-weight:bold;">紅燈：</span>景氣過熱，股市往往處於歷史高點，需居高思危。</li><li><span style="color:#22c55e;font-weight:bold;">綠燈：</span>景氣穩定。</li><li><span style="color:#3b82f6;font-weight:bold;">藍燈：</span>景氣低迷，股市通常跌至谷底。</li></ul></div><div class="content-box"><h3 class="content-h3">實戰口訣</h3>「藍燈買股票，紅燈數鈔票」。在連續亮出藍燈時分批建倉，往往能買在極佳的長線大波段起漲點。</div>` },
+                { id: "m5", title: "景氣風向球：PMI 採購經理人指數", desc: "經濟好不好？不用等財報，直接問第一線的企業採購主管最準！", iconClass: "icon-orange", icon: "fa-industry", badge: "實戰", badgeClass: "badge-action", time: "7 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">榮枯分水嶺：50</h3>針對企業採購主管的調查。PMI > 50 代表景氣「擴張」，有利股市；PMI < 50 代表景氣「緊縮」，企業正在砍單或裁員，股市風險增加。</div>` },
+                { id: "m14", title: "美國消費引擎：零售銷售數據 (Retail Sales)", desc: "美國人愛不愛花錢？佔美國 GDP 七成的關鍵消費數據。", iconClass: "icon-blue", icon: "fa-shopping-cart", badge: "實戰", badgeClass: "badge-action", time: "7 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">恐怖數據</h3>由於美國經濟有 70% 靠內部消費支撐，這項數據若大幅低於預期，代表民眾縮衣節食，經濟衰退的疑慮會瞬間引爆美股賣壓，因此常被華爾街稱為「恐怖數據」。</div>` },
+                { id: "m15", title: "通膨的萬惡之源：原油價格", desc: "油價飆漲為何會讓股市崩盤？看懂原油與通膨的致命連動。", iconClass: "icon-purple", icon: "fa-gas-pump", badge: "實戰", badgeClass: "badge-action", time: "8 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">輸入性通膨</h3>原油是所有工業與運輸的血液。當國際油價(如布蘭特原油)狂飆，所有商品的製造成本與運費都會暴增，直接引發<span class="text-down">嚴重的通貨膨脹</span>。</div><div class="content-box"><h3 class="content-h3">股市的噩夢</h3>油價引發的通膨會迫使央行「激進升息」，進而壓垮企業獲利與股市估值，這也是為什麼地緣政治(如中東戰爭)影響油價時，股市都會劇烈震盪。</div>` },
+                { id: "m16", title: "就業市場溫度計：初領失業救濟金人數", desc: "每週四準時開獎！最即時反映美國裁員潮的高頻數據。", iconClass: "icon-red", icon: "fa-user-injured", badge: "實戰", badgeClass: "badge-action", time: "6 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">高頻數據的優勢</h3>非農就業一個月才公布一次，但「初領失業金人數」每週公布。如果發現這個數字<span class="text-down">連續幾週飆升</span>，代表企業正在大規模裁員，是經濟轉弱的最早期信號。</div>` },
+                { id: "m17", title: "台股電子的未來：台灣外銷訂單數據", desc: "接單到出貨有時間差！提早一到兩個月預知電子股的業績表現。", iconClass: "icon-teal", icon: "fa-ship", badge: "實戰", badgeClass: "badge-action", time: "7 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">領先指標</h3>台灣是出口導向國家，企業通常是「先接單、後生產、再出口」。因此，每月的「外銷訂單年增率」是台灣實體經濟與台股大盤極具參考價值的<span class="highlight">領先指標</span>。若外銷訂單大衰退，接下來的財報季絕對不妙。</div>` },
+                { id: "m6", title: "通膨 CPI 與 台幣匯率的影響", desc: "搞懂物價指數與台幣升貶，掌握外資進出的關鍵密碼。", iconClass: "icon-teal", icon: "fa-comment-dollar", badge: "進階", badgeClass: "badge-adv", time: "8 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">消費者物價指數 (CPI)</h3>CPI 數據若飆高，市場會預期 Fed 準備升息，通常會引發股市大跌。</div><div class="content-box"><h3 class="content-h3">台幣升值與貶值</h3><ul class="custom-list"><li><b>台幣升值：</b>熱錢湧入，<span class="text-up">有利台股大盤上漲</span>。</li><li><b>台幣貶值：</b>外資撤離台灣，<span class="text-down">台股容易面臨提款賣壓</span>。但對外銷出口電子股有利（匯兌收益）。</li></ul></div>` },
+                { id: "m18", title: "資金洪流：縮表 (QT) 與擴表 (QE)", desc: "比升降息更兇猛的武器！看懂央行如何在市場上直接大灑幣與抽銀根。", iconClass: "icon-yellow", icon: "fa-water", badge: "進階", badgeClass: "badge-adv", time: "9 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">量化寬鬆 (QE / 擴表)</h3>央行直接印鈔票去市場上大量買進債券。等於直接拿大水管向市場注 জলা，這會引發資金氾濫，造就<span class="text-up">史詩級的股市泡沫與狂飆</span>。</div><div class="content-box"><h3 class="content-h3">量化緊縮 (QT / 縮表)</h3>央行手上的債券到期後不再買新債，直接把市場上的錢收回來註銷。這等於釜底抽薪，對股市的殺傷力有時比單純升息還要可怕。</div>` },
+                { id: "m19", title: "破解官員底牌：Fed 點陣圖 (Dot Plot)", desc: "不用瞎猜何時降息！直接看聯準會官員們自己畫的未來利率路徑。", iconClass: "icon-blue", icon: "fa-braille", badge: "進階", badgeClass: "badge-adv", time: "10 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">什麼是點陣圖？</h3>Fed 每季(3、6、9、12月)公布一次。每位決策官員會在圖表上畫一個點，代表他個人預測「今年底、明後年底」的利率應該落在多少。</div><div class="content-box"><h3 class="content-h3">預測未來的神器</h3>市場會看點陣圖的中位數。如果點陣圖顯示明年預期會降息 3 碼，但市場本來樂觀預估降息 6 碼，這極大的落差就會立刻引發股市<span class="text-down">劇烈回檔修正</span>。</div>` },
+                { id: "m20", title: "利率的數學模型：泰勒法則 (Taylor Rule)", desc: "機構法人的專屬工具！用通膨與就業缺口算出最合理的基準利率。", iconClass: "icon-purple", icon: "fa-calculator", badge: "進階", badgeClass: "badge-adv", time: "11 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">泰勒法則的核心</h3>一個著名的經濟學公式。它將「當前通膨率與目標通膨的差距」以及「當前 GDP 與潛在 GDP 的缺口」代入計算，得出一個客觀的建議利率。</div><div class="content-box"><h3 class="content-h3">法人預測利器</h3>當實際利率遠低於泰勒法則算出的利率時，法人就會知道央行「升息壓力極大」，便會提早調整部位放空債券或減碼股票，這就是機構能跑在散戶前面的秘密。</div>` }
+            ],
+            psychology: [
+                { id: "p1", title: "停損的紀律：為什麼「小賠」比「大賺」更重要", desc: "技術分析學再多，沒有停損紀律照樣賠光。教你建立自己的停損原則。", iconClass: "icon-red", icon: "fa-shield-halved", badge: "入門", badgeClass: "badge-intro", time: "6 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">為什麼一定要停損？</h3>虧損是不對稱的：跌 50% 需要漲 100% 才能回本。停損的目的不是「猜對」，而是把每一次判斷錯誤的代價控制在可承受範圍內，留住資本才能等到下一次機會。</div><div class="content-box"><h3 class="content-h3">設定停損的方式</h3>常見做法有「固定百分比」（例如跌破成本8%出場）、「技術面停損」（跌破關鍵均線或前波低點）。<span class="highlight">重點不是哪一種最好，而是設定之後要確實執行，不要每次都找理由凹單。</span></div>` },
+                { id: "p2", title: "部位大小怎麼抓：資金控管的2%原則", desc: "同一檔股票該押多少錢？機構交易員最基本的資金管理概念。", iconClass: "icon-blue", icon: "fa-scale-balanced", badge: "入門", badgeClass: "badge-intro", time: "6 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">單筆風險不超過總資金2%</h3>假設總資金100萬，單筆交易願意承受的最大虧損建議抓在2萬元(2%)以內。搭配停損點位，就能反推「這筆最多可以買多少股」，而不是憑感覺重壓。</div><div class="content-box"><h3 class="content-h3">為什麼不要重壓單一個股</h3>就算勝率很高，只要重壓的那一次遇到黑天鵝(無量跌停、財報地雷)，就可能讓帳戶元氣大傷，需要很長時間才能回本。</div>` },
+                { id: "p3", title: "分批進出場：金字塔加碼與分批停利", desc: "不要一次全押、也不要一次全出，分批操作降低情緒對決策的干擾。", iconClass: "icon-teal", icon: "fa-layer-group", badge: "必讀", badgeClass: "badge-must", time: "7 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">金字塔加碼</h3>第一筆小量試單，確認方向正確、趨勢成形後再逐步加碼，且後面加碼的量要遞減，避免在相對高點重壓。</div><div class="content-box"><h3 class="content-h3">分批停利</h3>到達第一個目標價先獲利了結一部分，剩餘部位移動停損保護獲利、讓利潤繼續奔跑。<span class="highlight">分批操作的好處是不用精準猜到最高點或最低點，也能拿到中段的獲利。</span></div>` },
+                { id: "p4", title: "風險報酬比：為什麼要抓「賺2賠1」以上才進場", desc: "勝率不是唯一標準！算出每一筆交易值不值得冒險的關鍵指標。", iconClass: "icon-green", icon: "fa-chart-simple", badge: "必讀", badgeClass: "badge-must", time: "6 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">風險報酬比 (Risk/Reward Ratio)</h3>公式：預期獲利空間 / 可能虧損空間。例如停損設在跌5%、目標價設在漲15%，風險報酬比就是3:1。</div><div class="content-box"><h3 class="content-h3">勝率不用很高也能賺錢</h3>如果風險報酬比抓在2:1以上，就算勝率只有40%，長期下來期望值依然是正的。<span class="text-up">這也是為什麼專業交易者更在意「賺賠比」而不是單純追求猜對的次數。</span></div>` },
+                { id: "p5", title: "反市場心理偏誤：FOMO、定錨效應與損失厭惡", desc: "投資最大的敵人往往是自己。認識這幾個常見的心理陷阱。", iconClass: "icon-purple", icon: "fa-brain", badge: "必讀", badgeClass: "badge-must", time: "8 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">FOMO (錯失恐懼)</h3>看到股票一直漲，怕錯過而追高買進，往往買在波段相對高點。</div><div class="content-box"><h3 class="content-h3">定錨效應</h3>太執著於自己的買進成本價，例如「等漲回我的成本就出場」，而忽略了公司基本面或趨勢早已改變。</div><div class="content-box"><h3 class="content-h3">損失厭惡</h3>人對虧損的痛苦感受遠大於獲利的快樂，導致該停損時捨不得停損、該停利時又太早跑掉。</div>` },
+                { id: "p6", title: "交易日誌與覆盤：把每一次犯錯變成下次的養分", desc: "頂尖交易者都有的習慣，用紀錄找出自己一再犯的錯誤模式。", iconClass: "icon-orange", icon: "fa-book-open", badge: "實戰", badgeClass: "badge-action", time: "6 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">交易日誌該記錄什麼</h3>進場理由、停損停利設定、當下的心情、結果如何、事後檢討。重點不是記錄賺賠金額，而是記錄「決策當下的思考邏輯」。</div><div class="content-box"><h3 class="content-h3">定期覆盤</h3>每月回頭檢視交易日誌，通常會發現自己一再重複的錯誤(例如總是不停損、總是追高)。<span class="highlight">找出自己的固定弱點，比學十種新的技術指標更有效。</span></div>` },
+                { id: "p7", title: "過度交易與報復性交易：連續虧損後最容易犯的錯", desc: "賠錢後想「凹回來」的心態，往往是把小虧損滾成大災難的起點。", iconClass: "icon-red", icon: "fa-triangle-exclamation", badge: "實戰", badgeClass: "badge-action", time: "7 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">報復性交易</h3>連續虧損後，為了想快點把錢賺回來，不顧原本的交易紀律、加大部位追進沒有把握的標的，通常會讓虧損進一步擴大。</div><div class="content-box"><h3 class="content-h3">如何避免</h3>可以預先設定「單日/單週最大虧損上限」，一旦觸及就強制停止交易、離開盤面冷靜，等情緒穩定、重新檢視策略後再進場。</div>` },
+                { id: "p8", title: "資產配置與分散風險：雞蛋不要放在同一個籃子", desc: "分散不是買很多檔股票就好，教你看懂真正有效的分散方式。", iconClass: "icon-yellow", icon: "fa-chart-pie", badge: "進階", badgeClass: "badge-adv", time: "8 分鐘閱讀", content: `<div class="content-box"><h3 class="content-h3">相關性才是分散的關鍵</h3>如果同時買了10檔電子股，看似分散，但同產業景氣循環一致，齊漲齊跌的相關性很高，並不是有效的分散。真正的分散要跨產業、甚至跨資產類別(股票、債券、現金)。</div><div class="content-box"><h3 class="content-h3">依風險承受度調整比例</h3>年輕、風險承受度高可以拉高股票部位；接近需要用錢的時間點，則應該逐步提高現金與債券比重，降低單一市場波動對整體資產的衝擊。</div>` }
+            ]
+        };
+
+        const listContainer = document.getElementById('article-list');
+        const modalOverlay = document.getElementById('articleModal');
+        const modalTag = document.getElementById('modalTag');
+        const modalTitle = document.getElementById('modalTitle');
+        const modalContent = document.getElementById('modalContent');
+
+        // 渲染文章清單
+        function renderArticles(category) {
+            const data = articleDatabase[category];
+            listContainer.innerHTML = ""; 
+
+            const tagNames = { fundamental: "基本面", chips: "籌碼面", tech: "技術分析", macro: "總體經濟", psychology: "交易心法" };
+
+            data.forEach(item => {
+                const card = document.createElement('div');
+                card.className = 'article-card';
+                card.innerHTML = `
+                    <div class="article-icon-box ${item.iconClass}">
+                        <i class="fas ${item.icon}"></i>
+                    </div>
+                    <div class="article-info">
+                        <div>
+                            <div class="article-title">${item.title}</div>
+                            <div class="article-desc">${item.desc}</div>
+                        </div>
+                        <div class="article-meta">
+                            <span class="meta-badge ${item.badgeClass}">${item.badge}</span>
+                            <span class="meta-time"><i class="far fa-clock"></i> ${item.time}</span>
+                        </div>
+                    </div>
+                `;
+                // 點擊開啟詳細視窗
+                card.addEventListener('click', () => {
+                    openModal(tagNames[category], item.title, item.content, item.id);
+                });
+                listContainer.appendChild(card);
+            });
+        }
+
+        // 搜尋功能：跨所有分類比對標題與摘要
+        function toggleSearchBox() {
+            const box = document.getElementById('searchBox');
+            const input = document.getElementById('articleSearchInput');
+            const isHidden = box.style.display === 'none';
+            box.style.display = isHidden ? 'block' : 'none';
+            if (isHidden) {
+                input.focus();
+            } else {
+                input.value = '';
+                runArticleSearch('');
+            }
+        }
+
+        function runArticleSearch(query) {
+            const keyword = query.trim().toLowerCase();
+            const tagNames = { fundamental: "基本面", chips: "籌碼面", tech: "技術分析", macro: "總體經濟", psychology: "交易心法" };
+
+            if (!keyword) {
+                // 清空搜尋，還原成目前選取的分類
+                const activeTab = document.querySelector('.category-tag.active');
+                renderArticles(activeTab ? activeTab.getAttribute('data-category') : 'fundamental');
+                return;
+            }
+
+            let matched = [];
+            categoryOrder.forEach(cat => {
+                articleDatabase[cat].forEach(item => {
+                    if (item.title.toLowerCase().includes(keyword) || item.desc.toLowerCase().includes(keyword)) {
+                        matched.push({ ...item, category: cat });
+                    }
+                });
+            });
+
+            listContainer.innerHTML = '';
+            if (matched.length === 0) {
+                listContainer.innerHTML = `<div style="text-align:center; color:#94a3b8; padding:30px;">找不到符合「${query}」的文章</div>`;
+                return;
+            }
+
+            matched.forEach(item => {
+                const card = document.createElement('div');
+                card.className = 'article-card';
+                card.innerHTML = `
+                    <div class="article-icon-box ${item.iconClass}">
+                        <i class="fas ${item.icon}"></i>
+                    </div>
+                    <div class="article-info">
+                        <div>
+                            <div class="article-title">${item.title}</div>
+                            <div class="article-desc">${item.desc}</div>
+                        </div>
+                        <div class="article-meta">
+                            <span class="meta-badge ${item.badgeClass}">${item.badge}</span>
+                            <span class="meta-time"><i class="fas fa-folder"></i> ${tagNames[item.category]}</span>
+                        </div>
+                    </div>
+                `;
+                card.addEventListener('click', () => {
+                    openModal(tagNames[item.category], item.title, item.content, item.id);
+                });
+                listContainer.appendChild(card);
+            });
+        }
+
+        // 標籤切換邏輯
+        const tabs = document.querySelectorAll('.category-tag');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', function() {
+                tabs.forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+                
+                const cat = this.getAttribute('data-category');
+                listContainer.style.opacity = '0';
+                setTimeout(() => {
+                    renderArticles(cat);
+                    listContainer.style.opacity = '1';
+                }, 150);
+            });
+        });
+
+        // 打開 Modal
+        function openModal(tag, title, content, articleId) {
+            modalTag.innerText = tag;
+            modalTitle.innerText = title;
+            modalContent.innerHTML = content;
+
+            modalOverlay.classList.add('active');
+            document.body.style.overflow = 'hidden';
+
+            if (articleId) {
+                markArticleRead(articleId);
+            }
+        }
+
+        // 關閉 Modal
+        function closeModal() {
+            modalOverlay.classList.remove('active');
+            document.body.style.overflow = 'auto';
+        }
+
+        function closeModalOnBg(event) {
+            if (event.target === modalOverlay) {
+                closeModal();
+            }
+        }
+
+        // ==========================================
+        // 個人化閱讀進度（登入才有，未登入顯示通用提示）
+        // ==========================================
+        const API_BASE_URL = "https://128gzb5evxna.shares.zrok.io";
+
+        // --- Zrok 攔截頁繞過 + JWT Auth Interceptor ---
+        const originalFetch = window.fetch;
+        window.fetch = async function() {
+            let [resource, config] = arguments;
+            if(typeof resource === 'string' && resource.includes(API_BASE_URL)) {
+                config = config || {};
+                config.headers = config.headers || {};
+                config.headers['skip_zrok_interstitial'] = 'true';
+                const token = localStorage.getItem('access_token');
+                if (token) {
+                    config.headers['Authorization'] = 'Bearer ' + token;
+                }
+            }
+            return originalFetch(resource, config);
+        };
+        // -----------------------------
+        const categoryOrder = ['fundamental', 'chips', 'tech', 'macro', 'psychology'];
+
+        function getAllArticlesInOrder() {
+            let all = [];
+            categoryOrder.forEach(cat => {
+                articleDatabase[cat].forEach(item => all.push({ ...item, category: cat }));
+            });
+            return all;
+        }
+
+        async function loadReadingProgress() {
+            const token = localStorage.getItem('access_token');
+            const subtitleEl = document.getElementById('readingSubtitle');
+            const progressTextEl = document.getElementById('readingProgressText');
+            const nextTitleEl = document.getElementById('readingNextTitle');
+            const barEl = document.getElementById('readingProgressBar');
+            const btnEl = document.getElementById('readingContinueBtn');
+
+            if (!token) {
+                subtitleEl.innerHTML = '<i class="fas fa-lock"></i> 登入後可追蹤您的個人閱讀進度';
+                progressTextEl.innerText = '';
+                nextTitleEl.innerText = '目前顯示的是通用文章庫，登入即可記錄已讀進度';
+                barEl.style.width = '0%';
+                btnEl.style.display = 'none';
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/education/progress`, {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (!res.ok) throw new Error('讀取進度失敗');
+                const data = await res.json();
+                const readIds = new Set(data.read_article_ids || []);
+
+                const allArticles = getAllArticlesInOrder();
+                const percent = allArticles.length > 0 ? Math.round((readIds.size / allArticles.length) * 100) : 0;
+                const nextArticle = allArticles.find(a => !readIds.has(a.id));
+
+                subtitleEl.innerHTML = '<i class="fas fa-robot"></i> 根據您的閱讀紀錄推薦';
+                progressTextEl.innerText = `已讀 ${readIds.size}/${allArticles.length}（${percent}%）`;
+                barEl.style.width = `${percent}%`;
+
+                if (nextArticle) {
+                    nextTitleEl.innerText = nextArticle.title;
+                    btnEl.style.display = 'flex';
+                    btnEl.onclick = () => {
+                        const tagNames = { fundamental: "基本面", chips: "籌碼面", tech: "技術分析", macro: "總體經濟", psychology: "交易心法" };
+                        openModal(tagNames[nextArticle.category], nextArticle.title, nextArticle.content, nextArticle.id);
+                    };
+                } else {
+                    nextTitleEl.innerText = '🎉 已讀完所有文章！';
+                    btnEl.style.display = 'none';
+                }
+            } catch (err) {
+                console.error(err);
+                subtitleEl.innerHTML = '<i class="fas fa-triangle-exclamation"></i> 無法載入閱讀進度';
+                nextTitleEl.innerText = '請檢查網路連線後重新整理';
+            }
+        }
+
+        async function markArticleRead(articleId) {
+            const token = localStorage.getItem('access_token');
+            if (!token) return;
+            try {
+                await fetch(`${API_BASE_URL}/api/education/read/${articleId}`, {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                loadReadingProgress(); // 讀完馬上刷新進度條
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        // 底部導覽列未讀紅點：比對後端資料是否有比「上次查看時間」更新的內容
+        async function checkBadgeStatus() {
+            const token = localStorage.getItem('access_token');
+            if (!token) return;
+
+            let communitySince = localStorage.getItem('community_badge_seen');
+            if (!communitySince) {
+                communitySince = new Date().toISOString();
+                localStorage.setItem('community_badge_seen', communitySince);
+            }
+            let repliesSince = localStorage.getItem('notif_badge_seen');
+            if (!repliesSince) {
+                repliesSince = new Date().toISOString();
+                localStorage.setItem('notif_badge_seen', repliesSince);
+            }
+
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/notifications/badge_status?community_since=${encodeURIComponent(communitySince)}&replies_since=${encodeURIComponent(repliesSince)}`);
+                const data = await res.json();
+                if (data.status !== 'success') return;
+
+                const communityDot = document.getElementById('communityBadgeDot');
+                if (communityDot) communityDot.classList.toggle('show', !!data.has_new_community_posts);
+
+                const profileDot = document.getElementById('profileBadgeDot');
+                if (profileDot) profileDot.classList.toggle('show', !!data.has_new_replies_to_me);
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        // 初始化：預設顯示基本面
+        renderArticles('fundamental');
+        listContainer.style.transition = 'opacity 0.2s';
+        loadReadingProgress();
+        checkBadgeStatus();
+    </script>
+    <script>
+        document.addEventListener('click', function(e) {
+            const btn = e.target.closest('.rip-btn');
+            if (!btn) return;
+            const rect = btn.getBoundingClientRect();
+            const size = Math.max(rect.width, rect.height) * 2;
+            const ink = document.createElement('span');
+            ink.className = 'rip-ink';
+            ink.style.width = ink.style.height = size + 'px';
+            ink.style.left = (e.clientX - rect.left - size / 2) + 'px';
+            ink.style.top = (e.clientY - rect.top - size / 2) + 'px';
+            btn.appendChild(ink);
+            requestAnimationFrame(() => { ink.style.transform = 'scale(1)'; ink.style.opacity = '0'; });
+            setTimeout(() => ink.remove(), 600);
+        });
+    </script>
+</body>
+</html>

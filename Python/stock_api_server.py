@@ -1,9 +1,12 @@
 # 程式名稱：ProQuant 正式版後端 API 伺服器 (MySQL 雲端版 + AI 預測)
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, status
 from pydantic import BaseModel
+from passlib.context import CryptContext
+import jwt
+from fastapi.security import OAuth2PasswordBearer
+from datetime import timedelta
 from typing import List, Optional
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi import UploadFile, File
 import shutil
 from sqlalchemy import create_engine, text
@@ -11,16 +14,19 @@ import pandas as pd
 import uvicorn
 from datetime import datetime, date
 import os
-from datetime import datetime, date
 import xgboost as xgb
 import asyncio
 import time
 import yfinance as yf
+from fastapi.staticfiles import StaticFiles
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
+# 確保上傳資料夾存在，否則存檔會報錯
+os.makedirs(os.path.join(current_dir, "uploads"), exist_ok=True)
+
 # 引入連線字串與自訂模組
-from config import MYSQL_CONN_STR, GEMINI_API_KEY
+from config import MYSQL_CONN_STR, GEMINI_API_KEY, JWT_SECRET_KEY
 import google.generativeai as genai
 import sentiment_crawler
 
@@ -33,6 +39,9 @@ if GEMINI_API_KEY and GEMINI_API_KEY != "在這裡填入您的金鑰":
     genai.configure(api_key=GEMINI_API_KEY)
 
 app = FastAPI(title="ProQuant AI API Terminal", version="3.0.0")
+
+# 允許前端讀取上傳的圖片
+app.mount("/uploads", StaticFiles(directory=os.path.join(current_dir, "uploads")), name="uploads")
 
 app.add_middleware(
     CORSMiddleware,
@@ -48,6 +57,13 @@ if not os.path.exists(uploads_dir):
     os.makedirs(uploads_dir)
 app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
+# 網頁版：跟 App 共用同一個後端，掛在 /web 底下，避免跟根目錄的健康檢查、/api/* 路由打架
+# 對應本機的 attachments/ 資料夾，上傳到伺服器時放進這裡指定的 web 資料夾
+web_dir = os.path.join(current_dir, "web")
+if not os.path.exists(web_dir):
+    os.makedirs(web_dir)
+app.mount("/web", StaticFiles(directory=web_dir, html=True), name="web")
+
 # ==========================================
 # 社群論壇資料結構
 # ==========================================
@@ -59,6 +75,7 @@ class ReplyData(BaseModel):
 class Post(BaseModel):
     id: int
     user: str
+    user_email: Optional[str] = None
     icon: str
     time: int
     sentiment: str
@@ -70,6 +87,9 @@ class Post(BaseModel):
 
 class LikeAction(BaseModel):
     action: str
+
+class PostEditData(BaseModel):
+    content: str
 
 # (JSON 邏輯已移除，改用 SQL 資料庫)
 
@@ -172,6 +192,277 @@ COLUMN_MAPPING = {
 }
 
 # ==========================================
+# 認證與登入系統 (JWT)
+# ==========================================
+if not JWT_SECRET_KEY:
+    raise RuntimeError(
+        "環境變數 JWT_SECRET_KEY 未設定。請在 .env 檔案加入一行 JWT_SECRET_KEY=一串隨機字串"
+        "（例如用 python -c \"import secrets; print(secrets.token_hex(32))\" 產生）"
+    )
+SECRET_KEY = JWT_SECRET_KEY
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 天
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+    except jwt.PyJWTError:
+        raise credentials_exception
+    return email
+
+class UserRegister(BaseModel):
+    email: str
+    password: str
+    name: Optional[str] = None
+    phone: Optional[str] = None
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+@app.post("/api/auth/register")
+def register_user(user: UserRegister):
+    with engine.connect() as conn:
+        res = conn.execute(text("SELECT id FROM Users WHERE email = :e"), {"e": user.email}).fetchone()
+        if res:
+            raise HTTPException(status_code=400, detail="Email already registered")
+
+        hashed_pw = get_password_hash(user.password)
+        conn.execute(
+            text("INSERT INTO Users (email, password_hash, name, phone) VALUES (:e, :p, :n, :ph)"),
+            {"e": user.email, "p": hashed_pw, "n": user.name, "ph": user.phone}
+        )
+        conn.commit()
+    return {"status": "success", "message": "User registered successfully"}
+
+@app.get("/api/user/me")
+def get_my_profile(current_user: str = Depends(get_current_user)):
+    with engine.connect() as conn:
+        res = conn.execute(
+            text("SELECT email, name, phone FROM Users WHERE email = :e"), {"e": current_user}
+        ).fetchone()
+        if not res:
+            raise HTTPException(status_code=404, detail="User not found")
+        return {"email": res[0], "name": res[1], "phone": res[2]}
+
+class UserProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+
+@app.put("/api/user/me")
+def update_my_profile(payload: UserProfileUpdate, current_user: str = Depends(get_current_user)):
+    with engine.connect() as conn:
+        conn.execute(
+            text("UPDATE Users SET name = :n, phone = :ph WHERE email = :e"),
+            {"n": payload.name, "ph": payload.phone, "e": current_user}
+        )
+        conn.commit()
+    return {"status": "success", "message": "Profile updated"}
+
+class PasswordChange(BaseModel):
+    old_password: str
+    new_password: str
+
+@app.put("/api/user/password")
+def change_password(payload: PasswordChange, current_user: str = Depends(get_current_user)):
+    with engine.connect() as conn:
+        res = conn.execute(
+            text("SELECT password_hash FROM Users WHERE email = :e"), {"e": current_user}
+        ).fetchone()
+        if not res or not verify_password(payload.old_password, res[0]):
+            raise HTTPException(status_code=401, detail="舊密碼不正確")
+
+        new_hash = get_password_hash(payload.new_password)
+        conn.execute(
+            text("UPDATE Users SET password_hash = :p WHERE email = :e"),
+            {"p": new_hash, "e": current_user}
+        )
+        conn.commit()
+    return {"status": "success", "message": "Password updated"}
+
+# ==========================================
+# 我的收藏
+# ==========================================
+@app.get("/api/favorites")
+def get_favorites(current_user: str = Depends(get_current_user)):
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT ticker, stock_name, created_at FROM Favorites WHERE user_email = :e ORDER BY created_at DESC"),
+            {"e": current_user}
+        ).fetchall()
+        return [{"ticker": r[0], "stock_name": r[1], "created_at": r[2].isoformat() if r[2] else None} for r in rows]
+
+class FavoriteAdd(BaseModel):
+    stock_name: Optional[str] = None
+
+@app.post("/api/favorites/{ticker}")
+def add_favorite(ticker: str, payload: FavoriteAdd = FavoriteAdd(), current_user: str = Depends(get_current_user)):
+    with engine.connect() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO Favorites (user_email, ticker, stock_name) VALUES (:e, :t, :n)
+                ON DUPLICATE KEY UPDATE stock_name = VALUES(stock_name)
+            """),
+            {"e": current_user, "t": ticker, "n": payload.stock_name}
+        )
+        conn.commit()
+    return {"status": "success", "message": f"{ticker} 已加入收藏"}
+
+@app.delete("/api/favorites/{ticker}")
+def remove_favorite(ticker: str, current_user: str = Depends(get_current_user)):
+    with engine.connect() as conn:
+        conn.execute(
+            text("DELETE FROM Favorites WHERE user_email = :e AND ticker = :t"),
+            {"e": current_user, "t": ticker}
+        )
+        conn.commit()
+    return {"status": "success", "message": f"{ticker} 已移除收藏"}
+
+# ==========================================
+# 瀏覽歷史
+# ==========================================
+class HistoryAdd(BaseModel):
+    stock_name: Optional[str] = None
+
+@app.post("/api/history/{ticker}")
+def add_history(ticker: str, payload: HistoryAdd = HistoryAdd(), current_user: str = Depends(get_current_user)):
+    with engine.connect() as conn:
+        conn.execute(
+            text("INSERT INTO ViewHistory (user_email, ticker, stock_name) VALUES (:e, :t, :n)"),
+            {"e": current_user, "t": ticker, "n": payload.stock_name}
+        )
+        conn.commit()
+    return {"status": "success"}
+
+@app.get("/api/history")
+def get_history(current_user: str = Depends(get_current_user)):
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT ticker, stock_name, viewed_at FROM ViewHistory WHERE user_email = :e ORDER BY viewed_at DESC LIMIT 100"),
+            {"e": current_user}
+        ).fetchall()
+        return [{"ticker": r[0], "stock_name": r[1], "viewed_at": r[2].isoformat() if r[2] else None} for r in rows]
+
+# ==========================================
+# 通知偏好設定（App 內偏好開關，尚未串接推播）
+# ==========================================
+@app.get("/api/notifications/settings")
+def get_notification_settings(current_user: str = Depends(get_current_user)):
+    with engine.connect() as conn:
+        res = conn.execute(
+            text("SELECT ai_alert, community_reply, system_announce FROM NotificationSettings WHERE user_email = :e"),
+            {"e": current_user}
+        ).fetchone()
+        if not res:
+            # 尚未設定過，回傳預設值（全開）
+            return {"ai_alert": True, "community_reply": True, "system_announce": True}
+        return {"ai_alert": bool(res[0]), "community_reply": bool(res[1]), "system_announce": bool(res[2])}
+
+class NotificationSettingsUpdate(BaseModel):
+    ai_alert: bool = True
+    community_reply: bool = True
+    system_announce: bool = True
+
+@app.put("/api/notifications/settings")
+def update_notification_settings(payload: NotificationSettingsUpdate, current_user: str = Depends(get_current_user)):
+    with engine.connect() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO NotificationSettings (user_email, ai_alert, community_reply, system_announce)
+                VALUES (:e, :a, :c, :s)
+                ON DUPLICATE KEY UPDATE ai_alert = VALUES(ai_alert), community_reply = VALUES(community_reply),
+                                        system_announce = VALUES(system_announce)
+            """),
+            {"e": current_user, "a": payload.ai_alert, "c": payload.community_reply, "s": payload.system_announce}
+        )
+        conn.commit()
+    return {"status": "success", "message": "Notification settings updated"}
+
+# ==========================================
+# 客服工單
+# ==========================================
+class SupportTicketCreate(BaseModel):
+    subject: str
+    message: str
+
+@app.post("/api/support")
+def create_support_ticket(payload: SupportTicketCreate, current_user: str = Depends(get_current_user)):
+    with engine.connect() as conn:
+        conn.execute(
+            text("INSERT INTO SupportTickets (user_email, subject, message) VALUES (:e, :s, :m)"),
+            {"e": current_user, "s": payload.subject, "m": payload.message}
+        )
+        conn.commit()
+    return {"status": "success", "message": "已收到您的問題，我們會盡快回覆"}
+
+# ==========================================
+# 教學中心：閱讀進度
+# ==========================================
+@app.post("/api/education/read/{article_id}")
+def mark_article_read(article_id: str, current_user: str = Depends(get_current_user)):
+    with engine.connect() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO ArticleReadLog (user_email, article_id) VALUES (:e, :a)
+                ON DUPLICATE KEY UPDATE read_at = read_at
+            """),
+            {"e": current_user, "a": article_id}
+        )
+        conn.commit()
+    return {"status": "success"}
+
+@app.get("/api/education/progress")
+def get_reading_progress(current_user: str = Depends(get_current_user)):
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT article_id FROM ArticleReadLog WHERE user_email = :e"), {"e": current_user}
+        ).fetchall()
+        return {"read_article_ids": [r[0] for r in rows]}
+
+@app.post("/api/auth/login")
+def login_user(user: UserLogin):
+    with engine.connect() as conn:
+        res = conn.execute(text("SELECT password_hash FROM Users WHERE email = :e"), {"e": user.email}).fetchone()
+        if not res:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        hashed_pw = res[0]
+        if not verify_password(user.password, hashed_pw):
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+            
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": user.email}, expires_delta=access_token_expires
+        )
+        return {"access_token": access_token, "token_type": "bearer"}
+
+# ==========================================
 # API 路由區塊
 # ==========================================
 @app.get("/")
@@ -183,7 +474,7 @@ class GeminiQuery(BaseModel):
     ticker: Optional[str] = None
 
 @app.post("/api/gemini/chat")
-async def gemini_chat(data: GeminiQuery):
+async def gemini_chat(data: GeminiQuery, current_user: str = Depends(get_current_user)):
     if not GEMINI_API_KEY or GEMINI_API_KEY == "在這裡填入您的金鑰":
         raise HTTPException(status_code=500, detail="Gemini API Key 尚未設定，請至 config.py 修改")
     
@@ -209,6 +500,26 @@ async def gemini_chat(data: GeminiQuery):
                 f"- 現金流與健康度：自由現金流 (FCF) = {fcf}\n"
                 f"- 籌碼結構：內部人持股 = {insider:.2f}%, 機構持股 = {inst:.2f}%\n"
             )
+
+            # --- 新增：抓取最新新聞標題放入提示詞 ---
+            import yfinance as yf
+            try:
+                tk_news = yf.Ticker(f"{ticker}.TW")
+                news_list = tk_news.news
+                if not news_list:
+                    tk_news = yf.Ticker(f"{ticker}.TWO")
+                    news_list = tk_news.news
+                    
+                if news_list:
+                    context_str += "- 近期最新新聞摘要：\n"
+                    for n in news_list[:3]:  # 取最新3筆新聞
+                        title = n.get("title", "")
+                        publisher = n.get("publisher", "")
+                        if title:
+                            context_str += f"  * {title} (來源: {publisher})\n"
+            except Exception as ne:
+                pass # 若新聞抓取失敗則忽略
+            # -----------------------------------
         except Exception as e:
             context_str += f"- (基本面資料擷取失敗：{str(e)})\n"
             
@@ -255,10 +566,16 @@ async def gemini_chat(data: GeminiQuery):
             context_str += f"- (AI 預測與價格資料擷取失敗：{str(e)})\n"
 
     # 組合 System Prompt 餵給 Gemini
+    # 設計重點：先直接回答問題本身，再用1~2個重點數據佐證，避免一般人看不懂的資料堆疊
     system_prompt = (
-        "你現在是 ProQuant 專業量化投資顧問，負責回答使用者關於台股投資的問題。\n"
-        "如果下方有提供個股的實時數據，請**務必結合並引用**這些數據為使用者分析、給出理性、客觀的量化分析與建議。\n"
-        "請用繁體中文（台灣習慣用語）回答，並使用適當的 markdown 格式（如粗體、條列式）讓排版清晰易讀。\n\n"
+        "你是 ProQuant 的 AI 助理，要讓完全不懂投資的一般人也看得懂你的回答。\n"
+        "回答規則：\n"
+        "1. 第一句話一定要先直接回答使用者的問題本身。例如被問「會不會漲」，第一句就要明確講看漲、看跌、或持平，不要先鋪陳數據、不要顧左右而言他。\n"
+        "2. 接著用 1~3 句白話文說明主要原因，只挑最相關的 1~2 個數據佐證（例如 AI 預測信心指數、近期漲跌趨勢），不要把下方提供的所有數據逐項列出來。\n"
+        "3. 不要使用條列式或項目符號（不要用「-」開頭或數字列點），一律寫成完整的口語化句子，最重要的關鍵字可以用 **粗體** 標示。\n"
+        "4. 全部使用繁體中文（台灣習慣用語）。\n"
+        "5. 如果使用者的問題跟股票投資無關，禮貌說明你只回答投資相關問題即可，不用長篇大論。\n"
+        "6. 結尾可視情況補一句簡短風險提醒（例如「僅供參考，不代表保證」），不用每次長篇強調。\n\n"
     )
     
     if context_str:
@@ -347,7 +664,7 @@ def get_leaderboard(limit: int = 5):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/sentiment/run_crawler/{ticker}")
-def trigger_sentiment_crawler(ticker: str):
+def trigger_sentiment_crawler(ticker: str, current_user: str = Depends(get_current_user)):
     print(f"📡 收到啟動輿情爬蟲請求 ({ticker})...")
     try:
         # 直接呼叫我們新建的 crawler function，並傳入要單獨爬取的股票代碼
@@ -357,6 +674,44 @@ def trigger_sentiment_crawler(ticker: str):
         else:
             raise HTTPException(status_code=500, detail=result["message"])
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/coverage_stats")
+def get_coverage_stats():
+    try:
+        query = """
+            SELECT COUNT(DISTINCT ticker) AS total, MAX(trade_date) AS updated_at
+            FROM StockPrice WHERE ticker NOT IN ('TSE', 'OTC')
+        """
+        with engine.connect() as conn:
+            df = pd.read_sql(text(query), conn)
+        row = df.iloc[0]
+        return {
+            "total": int(row['total']) if row['total'] is not None else 0,
+            "updated_at": str(row['updated_at'])[:10] if row['updated_at'] is not None else None,
+        }
+    except Exception as e:
+        print(f"❌ [API] 涵蓋範圍統計錯誤：{e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/search_stock")
+def search_stock(q: str, limit: int = 8):
+    q = (q or "").strip()
+    if not q:
+        return {"data": []}
+    try:
+        query = """
+            SELECT DISTINCT ticker, stock_name FROM StockPrice
+            WHERE trade_date = (SELECT MAX(trade_date) FROM StockPrice)
+            AND (ticker LIKE :q OR stock_name LIKE :q)
+            LIMIT :limit
+        """
+        with engine.connect() as conn:
+            df = pd.read_sql(text(query), conn, params={"q": f"%{q}%", "limit": limit})
+        result = [{"ticker": row['ticker'], "name": row['stock_name']} for _, row in df.iterrows()]
+        return {"data": result}
+    except Exception as e:
+        print(f"❌ [API] 股票搜尋錯誤：{e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/stock/{ticker}")
@@ -376,14 +731,19 @@ def get_stock_data(ticker: str, limit: int = 200):
 
         df = df.sort_values("trade_date")
         result = df.to_dict(orient='records')
-        
+
         for row in result:
             for key, value in row.items():
                 if isinstance(value, (datetime, date)):
                     row[key] = str(value)
-            
+                elif isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):
+                    # NaN 或 Infinity 不是合法 JSON，通常出現在指數(TSE/OTC)這種沒有正常成交量的資料，指標算不出來
+                    row[key] = None
+
         return {"ticker": ticker, "count": len(result), "data": result}
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ 錯誤：{e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -542,7 +902,7 @@ async def get_stock_fundamental_info(ticker: str):
         return {"status": "success", "data": default_data}
 
 @app.get("/api/prediction/{ticker}")
-def get_ai_prediction(ticker: str):
+def get_ai_prediction(ticker: str, current_user: str = Depends(get_current_user)):
     print(f"🧠 收到 AI 分析請求：股票代號 {ticker}")
     try:
         # 抓取最近 2 天來做明日預測與斜率計算
@@ -663,12 +1023,38 @@ def get_ai_prediction(ticker: str):
         print(f"❌ 預測錯誤：{e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+TREND_7D_CACHE_FILE = os.path.join(current_dir, "trend_7days_cache.json")
+TREND_7D_CACHE_TTL = 3600  # AutoGluon 推論一次要花好幾秒，同一股票同一小時內直接吃快取
+# 用檔案存快取，而不是 Python 記憶體變數：因為伺服器是多 worker process 模式，
+# 記憶體變數各個 process 互不相通，寫進檔案大家才能共用同一份快取。
+
+def _load_trend_7d_cache():
+    import json
+    try:
+        with open(TREND_7D_CACHE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _save_trend_7d_cache(cache):
+    import json
+    try:
+        with open(TREND_7D_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(cache, f)
+    except Exception as e:
+        print(f"⚠️ 寫入 trend_7days 快取失敗：{e}")
+
 @app.get("/api/trend_7days/{ticker}")
 def get_trend_7days(ticker: str):
+    cache = _load_trend_7d_cache()
+    cached = cache.get(ticker)
+    if cached and (time.time() - cached["ts"] < TREND_7D_CACHE_TTL):
+        return cached["data"]
+
     print(f"📊 收到 AutoGluon 七天預測請求：股票代號 {ticker}")
     if ag_predictor is None:
         raise HTTPException(status_code=503, detail="AutoGluon 模型尚未準備妥當")
-        
+
     try:
         from autogluon.timeseries import TimeSeriesDataFrame
         
@@ -729,8 +1115,13 @@ def get_trend_7days(ticker: str):
                 "upper": round(float(row.get("0.9", row.get("0.95", float(row.get("mean", 100))*1.05))), 2)
             })
             
-        return {"ticker": ticker, "predictions": result}
-        
+        response = {"ticker": ticker, "predictions": result}
+        # 重新讀一次最新的快取檔再寫入，避免蓋掉其他 worker 這期間幫別支股票寫入的結果
+        fresh_cache = _load_trend_7d_cache()
+        fresh_cache[ticker] = {"data": response, "ts": time.time()}
+        _save_trend_7d_cache(fresh_cache)
+        return response
+
     except Exception as e:
         print(f"❌ AutoGluon 預測遭遇錯誤：{e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -806,10 +1197,39 @@ def get_institutional_data(ticker: str, limit: int = 30):
         raise HTTPException(status_code=500, detail=str(e))
 
 # ==========================================
+# 重大訊息（AI分析頁的新聞列表用）
+# ==========================================
+@app.get("/api/material_news/{ticker}")
+def get_material_news(ticker: str, limit: int = 20):
+    try:
+        query = """
+            SELECT ticker, company_name, announce_date, announce_time, subject, detail
+            FROM MaterialNews
+            WHERE ticker = :ticker
+            ORDER BY announce_date DESC, announce_time DESC
+            LIMIT :limit
+        """
+        with engine.connect() as conn:
+            df = pd.read_sql(text(query), conn, params={"ticker": ticker, "limit": limit})
+
+        result = []
+        for _, row in df.iterrows():
+            result.append({
+                "date": str(row['announce_date'])[:10],
+                "time": row['announce_time'],
+                "subject": row['subject'],
+                "detail": row['detail'],
+            })
+        return {"count": len(result), "data": result}
+    except Exception as e:
+        print(f"❌ [API] 重大訊息讀取錯誤：{e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ==========================================
 # Gemini AI 深度解析 API
 # ==========================================
 @app.get("/api/gemini_analysis/{ticker}")
-async def get_gemini_analysis(ticker: str):
+async def get_gemini_analysis(ticker: str, current_user: str = Depends(get_current_user)):
     print(f"🤖 收到 Gemini 深度解析請求：股票代號 {ticker}")
     if not GEMINI_API_KEY or GEMINI_API_KEY == "在這裡填入您的金鑰":
         raise HTTPException(status_code=503, detail="尚未設定 Gemini API Key。請在 config.py 中填入您的金鑰。")
@@ -876,10 +1296,10 @@ async def get_gemini_analysis(ticker: str):
 def get_posts():
     try:
         user_col = "[user]" if "mssql" in MYSQL_CONN_STR.lower() else "user"
-        query_posts = f"SELECT id, {user_col} as [user], icon, created_at, sentiment, tag, content, likes, comments FROM Posts ORDER BY created_at DESC"
+        query_posts = f"SELECT id, {user_col} as [user], user_email, icon, created_at, sentiment, tag, content, likes, comments FROM Posts ORDER BY created_at DESC"
         # MSSQL alias 語法稍微不同，修正為更通用的方式
         if "mysql" in MYSQL_CONN_STR.lower():
-            query_posts = "SELECT id, user, icon, created_at, sentiment, tag, content, likes, comments FROM Posts ORDER BY created_at DESC"
+            query_posts = "SELECT id, user, user_email, icon, created_at, sentiment, tag, content, likes, comments FROM Posts ORDER BY created_at DESC"
         
         with engine.connect() as conn:
             df_posts = pd.read_sql(text(query_posts), conn)
@@ -904,6 +1324,7 @@ def get_posts():
             result.append({
                 "id": post_id,
                 "user": row['user'],
+                "user_email": row['user_email'] if pd.notna(row['user_email']) else None,
                 "icon": row['icon'],
                 "time": int(row['created_at'].timestamp() * 1000) if hasattr(row['created_at'], 'timestamp') else 0,
                 "sentiment": row['sentiment'],
@@ -919,15 +1340,20 @@ def get_posts():
         return []
 
 @app.post("/api/posts")
-def create_post(post: Post):
+def create_post(post: Post, current_user: str = Depends(get_current_user)):
     try:
         user_col = "[user]" if "mssql" in MYSQL_CONN_STR.lower() else "user"
         with engine.begin() as conn:
+            # 發文者身分一律以登入帳號查到的真實姓名為準，不信任前端送來的 user 欄位
+            name_res = conn.execute(text("SELECT name FROM Users WHERE email = :e"), {"e": current_user}).fetchone()
+            display_name = (name_res[0] if name_res and name_res[0] else current_user)
+
             conn.execute(text(f"""
-                INSERT INTO Posts ({user_col}, icon, created_at, sentiment, tag, content, likes, comments)
-                VALUES (:user, :icon, :created_at, :sentiment, :tag, :content, 0, 0)
+                INSERT INTO Posts ({user_col}, user_email, icon, created_at, sentiment, tag, content, likes, comments)
+                VALUES (:user, :user_email, :icon, :created_at, :sentiment, :tag, :content, 0, 0)
             """), {
-                "user": post.user,
+                "user": display_name,
+                "user_email": current_user,
                 "icon": post.icon,
                 "created_at": datetime.now(),
                 "sentiment": post.sentiment,
@@ -940,7 +1366,7 @@ def create_post(post: Post):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/posts/{post_id}/like")
-def toggle_like(post_id: int, action: LikeAction):
+def toggle_like(post_id: int, action: LikeAction, current_user: str = Depends(get_current_user)):
     try:
         with engine.begin() as conn:
             if action.action == "like":
@@ -957,13 +1383,17 @@ def toggle_like(post_id: int, action: LikeAction):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/posts/{post_id}")
-def delete_post(post_id: int):
+def delete_post(post_id: int, current_user: str = Depends(get_current_user)):
     try:
         with engine.begin() as conn:
-            # 檢查並刪除貼文 (Replies 會因為 ON DELETE CASCADE 自動刪除)
-            res = conn.execute(text("DELETE FROM Posts WHERE id = :id"), {"id": post_id})
-            if res.rowcount == 0:
+            owner_res = conn.execute(text("SELECT user_email FROM Posts WHERE id = :id"), {"id": post_id}).fetchone()
+            if not owner_res:
                 raise HTTPException(status_code=404, detail="找不到該貼文")
+            if owner_res[0] != current_user:
+                raise HTTPException(status_code=403, detail="只能刪除自己發布的貼文")
+
+            # 檢查並刪除貼文 (Replies 會因為 ON DELETE CASCADE 自動刪除)
+            conn.execute(text("DELETE FROM Posts WHERE id = :id"), {"id": post_id})
         return {"status": "success", "message": "貼文已刪除"}
     except HTTPException:
         raise
@@ -971,17 +1401,39 @@ def delete_post(post_id: int):
         print(f"❌ 刪除貼文失敗: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/posts/{post_id}/reply")
-def add_reply(post_id: int, reply: ReplyData):
+@app.put("/api/posts/{post_id}")
+def edit_post(post_id: int, data: PostEditData, current_user: str = Depends(get_current_user)):
     try:
         with engine.begin() as conn:
+            owner_res = conn.execute(text("SELECT user_email FROM Posts WHERE id = :id"), {"id": post_id}).fetchone()
+            if not owner_res:
+                raise HTTPException(status_code=404, detail="找不到該貼文")
+            if owner_res[0] != current_user:
+                raise HTTPException(status_code=403, detail="只能編輯自己發布的貼文")
+
+            conn.execute(text("UPDATE Posts SET content = :content WHERE id = :id"), {"content": data.content, "id": post_id})
+        return {"status": "success", "message": "貼文已更新"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ 編輯貼文失敗: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/posts/{post_id}/reply")
+def add_reply(post_id: int, reply: ReplyData, current_user: str = Depends(get_current_user)):
+    try:
+        with engine.begin() as conn:
+            # 回覆者身分一律以登入帳號查到的真實姓名為準，不信任前端送來的 author 欄位
+            name_res = conn.execute(text("SELECT name FROM Users WHERE email = :e"), {"e": current_user}).fetchone()
+            display_name = (name_res[0] if name_res and name_res[0] else current_user)
+
             # 插入回覆 (交給資料庫自動產生時間，避免格式不相容)
             conn.execute(text("""
                 INSERT INTO Replies (post_id, author, content)
                 VALUES (:post_id, :author, :content)
             """), {
                 "post_id": post_id,
-                "author": reply.author,
+                "author": display_name,
                 "content": reply.content
             })
             # 更新主貼文回覆數 (使用不同的參數名稱以防驅動程式報錯)
@@ -991,22 +1443,94 @@ def add_reply(post_id: int, reply: ReplyData):
         print(f"❌ 儲存回覆失敗: {e}")
         raise HTTPException(status_code=500, detail=f"儲存回覆失敗: {str(e)}")
 
+MAX_UPLOAD_SIZE = 5 * 1024 * 1024  # 5MB
+ALLOWED_UPLOAD_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+
 @app.post("/api/upload")
-async def upload_image(file: UploadFile = File(...)):
+async def upload_image(file: UploadFile = File(...), current_user: str = Depends(get_current_user)):
     try:
+        # 驗證檔案類型，避免有人上傳可執行檔或其他非圖片內容
+        if file.content_type not in ALLOWED_UPLOAD_TYPES:
+            raise HTTPException(status_code=400, detail="只允許上傳 JPG / PNG / GIF / WEBP 圖片")
+
+        contents = await file.read()
+        if len(contents) > MAX_UPLOAD_SIZE:
+            raise HTTPException(status_code=400, detail="圖片大小不能超過 5MB")
+
         # 生成唯一檔名
         import uuid
         file_ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
         file_name = f"{uuid.uuid4().hex}.{file_ext}"
         file_path = os.path.join(current_dir, "uploads", file_name)
-        
+
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-            
+            buffer.write(contents)
+
         # 回傳圖片的公開 URL
         return {"status": "success", "url": f"/uploads/{file_name}"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# ==========================================
+# 社群檢舉與封鎖
+# ==========================================
+class ReportCreate(BaseModel):
+    reason: str
+
+@app.post("/api/posts/{post_id}/report")
+def report_post(post_id: int, payload: ReportCreate, current_user: str = Depends(get_current_user)):
+    with engine.connect() as conn:
+        conn.execute(
+            text("INSERT INTO Reports (reporter_email, target_type, target_id, reason) VALUES (:e, 'post', :id, :r)"),
+            {"e": current_user, "id": post_id, "r": payload.reason}
+        )
+        conn.commit()
+    return {"status": "success", "message": "已收到您的檢舉，我們會盡快處理"}
+
+@app.post("/api/replies/{reply_id}/report")
+def report_reply(reply_id: int, payload: ReportCreate, current_user: str = Depends(get_current_user)):
+    with engine.connect() as conn:
+        conn.execute(
+            text("INSERT INTO Reports (reporter_email, target_type, target_id, reason) VALUES (:e, 'reply', :id, :r)"),
+            {"e": current_user, "id": reply_id, "r": payload.reason}
+        )
+        conn.commit()
+    return {"status": "success", "message": "已收到您的檢舉，我們會盡快處理"}
+
+@app.get("/api/blocks")
+def get_blocked_users(current_user: str = Depends(get_current_user)):
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT blocked_email FROM Blocks WHERE blocker_email = :e"), {"e": current_user}
+        ).fetchall()
+        return {"blocked": [r[0] for r in rows]}
+
+@app.post("/api/blocks/{target_email}")
+def block_user(target_email: str, current_user: str = Depends(get_current_user)):
+    if target_email == current_user:
+        raise HTTPException(status_code=400, detail="不能封鎖自己")
+    with engine.connect() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO Blocks (blocker_email, blocked_email) VALUES (:e, :t)
+                ON DUPLICATE KEY UPDATE blocked_email = VALUES(blocked_email)
+            """),
+            {"e": current_user, "t": target_email}
+        )
+        conn.commit()
+    return {"status": "success", "message": "已封鎖該使用者"}
+
+@app.delete("/api/blocks/{target_email}")
+def unblock_user(target_email: str, current_user: str = Depends(get_current_user)):
+    with engine.connect() as conn:
+        conn.execute(
+            text("DELETE FROM Blocks WHERE blocker_email = :e AND blocked_email = :t"),
+            {"e": current_user, "t": target_email}
+        )
+        conn.commit()
+    return {"status": "success", "message": "已解除封鎖"}
 
 @app.get("/api/trending_tags")
 def get_trending_tags():
@@ -1043,6 +1567,133 @@ def get_trending_tags():
     except Exception as e:
         print(f"❌ 取得熱門標籤失敗: {e}")
         return {"status": "success", "trending": ["2330", "2454", "2603", "3008"]}
+
+# ==========================================
+# 選股策略 API (讀取背景掃描快取)
+# ==========================================
+@app.get("/api/screener/{strategy_name}")
+def get_screener_results(strategy_name: str):
+    import json
+    cache_path = os.path.join(current_dir, "strategy_cache.json")
+    try:
+        if not os.path.exists(cache_path):
+            return {"status": "error", "message": "尚未建立掃描快取，請稍候或手動觸發背景掃描。"}
+            
+        with open(cache_path, "r", encoding="utf-8") as f:
+            cache_data = json.load(f)
+            
+        strategies = cache_data.get("strategies", {})
+        if strategy_name not in strategies:
+            return {"status": "error", "message": f"未知的策略名稱: {strategy_name}"}
+            
+        return {
+            "status": "success",
+            "updated_at": cache_data.get("updated_at"),
+            "data": strategies[strategy_name]
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"讀取快取失敗: {str(e)}"}
+
+@app.get("/api/ai_top_picks")
+def get_ai_top_picks():
+    import json
+    cache_path = os.path.join(current_dir, "ai_top_picks_cache.json")
+    try:
+        if not os.path.exists(cache_path):
+            return {"status": "error", "message": "尚未建立AI精選快取，請稍候或確認排程是否已執行過 ai_top_picks_scanner.py"}
+
+        with open(cache_path, "r", encoding="utf-8") as f:
+            cache_data = json.load(f)
+
+        return {
+            "status": "success",
+            "updated_at": cache_data.get("updated_at"),
+            "scanned_count": cache_data.get("scanned_count"),
+            "top_bullish": cache_data.get("top_bullish", []),
+            "top_bearish": cache_data.get("top_bearish", [])
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"讀取快取失敗: {str(e)}"}
+
+@app.get("/api/feature_importance")
+def get_feature_importance():
+    import json
+    path = os.path.join(current_dir, "feature_importance.json")
+    try:
+        if not os.path.exists(path):
+            return {"status": "error", "message": "尚未產生特徵重要性資料，請確認 Universal Trainer.py 是否已執行過"}
+
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        return {
+            "status": "success",
+            "updated_at": data.get("updated_at"),
+            "accuracy": data.get("accuracy"),
+            "features": data.get("features", [])
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"讀取失敗: {str(e)}"}
+
+@app.get("/api/prediction_accuracy")
+def get_prediction_accuracy(days: int = 30):
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(text("""
+                SELECT COUNT(*) AS total, SUM(is_correct) AS correct, MAX(predicted_at) AS latest_date
+                FROM PredictionLog
+                WHERE resolved = 1 AND predicted_at >= DATE_SUB(CURDATE(), INTERVAL :days DAY)
+            """), {"days": days}).fetchone()
+
+        total = row[0] or 0
+        correct = row[1] or 0
+        if total == 0:
+            return {"status": "success", "sample_size": 0, "hit_rate": None, "days": days, "message": "尚無已驗證的預測資料"}
+
+        return {
+            "status": "success",
+            "sample_size": total,
+            "hit_rate": round(correct / total * 100, 2),
+            "days": days,
+            "latest_date": str(row[2]) if row[2] else None
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"讀取失敗: {str(e)}"}
+
+# ==========================================
+# 底部導覽列未讀紅點：比對前端傳來的「上次查看時間」，判斷有沒有新內容
+# ==========================================
+@app.get("/api/notifications/badge_status")
+def get_badge_status(community_since: Optional[str] = None, replies_since: Optional[str] = None, current_user: str = Depends(get_current_user)):
+    try:
+        with engine.connect() as conn:
+            has_new_posts = False
+            if community_since:
+                res = conn.execute(
+                    text("SELECT COUNT(*) FROM Posts WHERE created_at > :since"),
+                    {"since": community_since}
+                ).fetchone()
+                has_new_posts = (res[0] or 0) > 0
+
+            has_new_replies = False
+            if replies_since:
+                res = conn.execute(
+                    text("""
+                        SELECT COUNT(*) FROM Replies r
+                        JOIN Posts p ON r.post_id = p.id
+                        WHERE p.user_email = :email AND r.created_at > :since
+                    """),
+                    {"email": current_user, "since": replies_since}
+                ).fetchone()
+                has_new_replies = (res[0] or 0) > 0
+
+        return {
+            "status": "success",
+            "has_new_community_posts": has_new_posts,
+            "has_new_replies_to_me": has_new_replies
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"讀取失敗: {str(e)}"}
 
 if __name__ == "__main__":
     print("🚀 ProQuant 後端服務正在啟動... (支援高併發模式)")

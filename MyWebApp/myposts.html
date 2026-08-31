@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的貼文 - ProQuant AI</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; padding: 0; background-color: #000000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; color: #ffffff; }
+        .app-container { width: 100%; max-width: 414px; height: 100vh; max-height: 896px; background-color: #121212; position: relative; display: flex; flex-direction: column; box-shadow: 0 0 20px rgba(255, 255, 255, 0.05); overflow: hidden; }
+        .header { padding: 10px 20px; background-color: #1e1e1e; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; height: 60px; }
+        .header .back-btn { color: #a0a0a0; text-decoration: none; display: flex; align-items: center; gap: 5px; font-size: 16px; width: 60px; }
+        .header-title { font-size: 18px; font-weight: bold; color: #e2e8f0; text-align: center; flex: 1; }
+        .header-placeholder { width: 60px; }
+        .content { flex: 1; overflow-y: auto; padding: 20px 25px; }
+
+        .section-title { font-size: 15px; font-weight: bold; color: #94a3b8; margin: 0 0 12px 0; display: flex; align-items: center; gap: 8px; }
+        .section-title.second { margin-top: 30px; }
+
+        .reply-card { background-color: #1e1e1e; border: 1px solid #2a2a2a; border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+        .reply-card .who { font-size: 13px; color: #38bdf8; font-weight: bold; }
+        .reply-card .on { font-size: 11px; color: #64748b; margin-left: 6px; }
+        .reply-card .body { font-size: 13px; color: #e2e8f0; margin-top: 6px; line-height: 1.5; }
+        .reply-card .time { font-size: 11px; color: #64748b; margin-top: 6px; }
+
+        .post-card { background-color: #1e1e1e; border: 1px solid #2a2a2a; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+        .post-tag { display: inline-block; color: #38bdf8; background-color: rgba(56, 189, 248, 0.1); padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-bottom: 8px; font-weight: bold; }
+        .post-content { font-size: 14px; color: #e2e8f0; line-height: 1.6; white-space: pre-wrap; }
+        .post-edit-area { width: 100%; min-height: 80px; background-color: #0f172a; border: 1px solid #334155; border-radius: 8px; color: white; padding: 10px; font-size: 14px; font-family: inherit; resize: vertical; box-sizing: border-box; }
+        .post-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 10px; border-top: 1px solid #2a2a2a; }
+        .post-stats { display: flex; gap: 16px; font-size: 12px; color: #94a3b8; }
+        .post-actions { display: flex; gap: 14px; font-size: 13px; }
+        .post-actions span { cursor: pointer; }
+        .action-edit { color: #38bdf8; }
+        .action-delete { color: #ef4444; }
+        .action-save { color: #22c55e; }
+        .action-cancel { color: #94a3b8; }
+
+        .empty-state { text-align: center; color: #94a3b8; margin: 40px 0; }
+        .empty-state i { font-size: 32px; margin-bottom: 12px; color: #333; display: block; }
+            .rip-btn { position: relative; overflow: hidden; }
+        .rip-ink { position: absolute; border-radius: 50%; background: rgba(255,255,255,0.35); pointer-events: none; transform: scale(0); opacity: 0.6; transition: transform 0.55s ease, opacity 0.55s ease; }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div class="header">
+            <a href="profile.html" class="back-btn"><i class="fas fa-chevron-left"></i> 返回</a>
+            <div class="header-title">我的貼文</div>
+            <div class="header-placeholder"></div>
+        </div>
+
+        <div class="content">
+            <div class="section-title"><i class="fas fa-reply"></i> 別人回覆你的貼文</div>
+            <div id="repliesToMeList"><div class="empty-state"><i class="fas fa-spinner fa-spin"></i>載入中...</div></div>
+
+            <div class="section-title second"><i class="fas fa-file-lines"></i> 我發布的貼文</div>
+            <div id="myPostsList"><div class="empty-state"><i class="fas fa-spinner fa-spin"></i>載入中...</div></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = "https://128gzb5evxna.shares.zrok.io";
+
+        // --- Zrok 攔截頁繞過 + JWT Auth Interceptor ---
+        const originalFetch = window.fetch;
+        window.fetch = async function() {
+            let [resource, config] = arguments;
+            if(typeof resource === 'string' && resource.includes(API_BASE_URL)) {
+                config = config || {};
+                config.headers = config.headers || {};
+                config.headers['skip_zrok_interstitial'] = 'true';
+                const token = localStorage.getItem('access_token');
+                if (token) {
+                    config.headers['Authorization'] = 'Bearer ' + token;
+                }
+            }
+            const response = await originalFetch(resource, config);
+            if (response.status === 401) {
+                localStorage.removeItem('access_token');
+                window.location.href = 'login.html';
+            }
+            return response;
+        };
+        // -----------------------------
+
+        if (!localStorage.getItem('access_token')) {
+            window.location.href = 'login.html';
+        }
+
+        let currentUserEmail = null;
+        let allPostsCache = [];
+
+        function timeAgo(ts) {
+            if (!ts) return '';
+            const diff = Date.now() - ts;
+            const mins = Math.floor(diff / 60000);
+            if (mins < 1) return '剛剛';
+            if (mins < 60) return `${mins} 分鐘前`;
+            const hours = Math.floor(mins / 60);
+            if (hours < 24) return `${hours} 小時前`;
+            return `${Math.floor(hours / 24)} 天前`;
+        }
+
+        async function loadMyPosts() {
+            const repliesEl = document.getElementById('repliesToMeList');
+            const postsEl = document.getElementById('myPostsList');
+            try {
+                const meRes = await fetch(`${API_BASE_URL}/api/user/me`);
+                if (!meRes.ok) throw new Error('無法取得使用者資訊');
+                const me = await meRes.json();
+                currentUserEmail = me.email;
+
+                const postsRes = await fetch(`${API_BASE_URL}/api/posts`);
+                const allPosts = await postsRes.json();
+                allPostsCache = allPosts;
+
+                const myPosts = allPosts.filter(p => p.user_email && p.user_email === currentUserEmail);
+
+                // --- 別人回覆你的貼文：把你所有貼文底下的回覆攤平、依時間排序 ---
+                const allReplies = [];
+                myPosts.forEach(post => {
+                    (post.replies || []).forEach(r => {
+                        allReplies.push({ ...r, postTag: post.tag, postContent: post.content, postId: post.id });
+                    });
+                });
+                allReplies.sort((a, b) => new Date(b.created_at || b.time) - new Date(a.created_at || a.time));
+
+                if (allReplies.length === 0) {
+                    repliesEl.innerHTML = `<div class="empty-state"><i class="fas fa-comment-slash"></i>目前還沒有人回覆你的貼文</div>`;
+                } else {
+                    repliesEl.innerHTML = allReplies.slice(0, 20).map(r => `
+                        <div class="reply-card">
+                            <span class="who">${r.author}</span><span class="on">回覆了你在「${r.postTag || '未分類'}」的貼文</span>
+                            <div class="body">${r.content}</div>
+                            <div class="time">${r.time || ''}</div>
+                        </div>
+                    `).join('');
+                }
+
+                // --- 我發布的貼文 ---
+                if (myPosts.length === 0) {
+                    postsEl.innerHTML = `<div class="empty-state"><i class="fas fa-file-circle-plus"></i>你還沒有發布過貼文，去社群分享你的看法吧</div>`;
+                } else {
+                    postsEl.innerHTML = myPosts.map(post => `
+                        <div class="post-card" id="post-card-${post.id}">
+                            <div class="post-tag">${post.tag || '未分類'}</div>
+                            <div id="post-view-${post.id}">
+                                <div class="post-content" id="post-content-${post.id}">${post.content}</div>
+                            </div>
+                            <div class="post-footer">
+                                <div class="post-stats">
+                                    <span><i class="fas fa-star"></i> ${post.likes || 0} 個讚</span>
+                                    <span><i class="fas fa-comment"></i> ${(post.replies || []).length} 則回覆</span>
+                                </div>
+                                <div class="post-actions" id="post-actions-${post.id}">
+                                    <span class="rip-btn action-edit" onclick="startEdit(${post.id})"><i class="fas fa-pen"></i> 編輯</span>
+                                    <span class="rip-btn action-delete" onclick="deleteMyPost(${post.id})"><i class="fas fa-trash"></i> 刪除</span>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            } catch (err) {
+                console.error(err);
+                repliesEl.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-triangle"></i>載入失敗，請檢查網路連線</div>`;
+                postsEl.innerHTML = '';
+            }
+        }
+
+        function startEdit(postId) {
+            const post = allPostsCache.find(p => p.id === postId);
+            if (!post) return;
+            const viewEl = document.getElementById(`post-view-${postId}`);
+            viewEl.innerHTML = `<textarea class="post-edit-area" id="post-edit-input-${postId}">${post.content}</textarea>`;
+            document.getElementById(`post-actions-${postId}`).innerHTML = `
+                <span class="rip-btn action-save" onclick="saveEdit(${postId})"><i class="fas fa-check"></i> 儲存</span>
+                <span class="rip-btn action-cancel" onclick="loadMyPosts()"><i class="fas fa-xmark"></i> 取消</span>
+            `;
+        }
+
+        async function saveEdit(postId) {
+            const input = document.getElementById(`post-edit-input-${postId}`);
+            const newContent = input.value.trim();
+            if (!newContent) {
+                alert('內容不能是空的');
+                return;
+            }
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/posts/${postId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content: newContent })
+                });
+                if (!res.ok) throw new Error('更新失敗');
+                loadMyPosts();
+            } catch (err) {
+                console.error(err);
+                alert('更新失敗，請稍後再試');
+            }
+        }
+
+        async function deleteMyPost(postId) {
+            if (!confirm('確定要刪除這篇貼文嗎？此動作無法復原。')) return;
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/posts/${postId}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error('刪除失敗');
+                loadMyPosts();
+            } catch (err) {
+                console.error(err);
+                alert('刪除失敗，請稍後再試');
+            }
+        }
+
+        loadMyPosts();
+    </script>
+    <script>
+        document.addEventListener('click', function(e) {
+            const btn = e.target.closest('.rip-btn');
+            if (!btn) return;
+            const rect = btn.getBoundingClientRect();
+            const size = Math.max(rect.width, rect.height) * 2;
+            const ink = document.createElement('span');
+            ink.className = 'rip-ink';
+            ink.style.width = ink.style.height = size + 'px';
+            ink.style.left = (e.clientX - rect.left - size / 2) + 'px';
+            ink.style.top = (e.clientY - rect.top - size / 2) + 'px';
+            btn.appendChild(ink);
+            requestAnimationFrame(() => { ink.style.transform = 'scale(1)'; ink.style.opacity = '0'; });
+            setTimeout(() => ink.remove(), 600);
+        });
+    </script>
+</body>
+</html>

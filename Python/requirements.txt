@@ -1,0 +1,25 @@
+# ProQuant 後端執行環境需要的套件
+# 安裝：pip install -r requirements.txt
+#
+# 注意：plotly、streamlit 沒有列在這裡，因為只有 stock_ai_web_app.py（已淘汰的舊 Streamlit 原型，
+# 已被 FastAPI + App 取代）會用到，正式環境不需要安裝。
+
+fastapi
+uvicorn[standard]
+sqlalchemy
+pymysql
+pandas
+numpy
+scipy
+scikit-learn
+xgboost
+autogluon.timeseries
+pydantic
+passlib[bcrypt]
+PyJWT
+python-dotenv
+requests
+beautifulsoup4
+yfinance
+ta
+google-generativeai

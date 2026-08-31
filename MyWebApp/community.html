@@ -1,0 +1,702 @@
+﻿<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProQuant AI - 社群討論</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* 基礎設定與深色背景 */
+        body { margin: 0; padding: 0; background-color: #000000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; color: #ffffff; }
+        .app-container { width: 100%; max-width: 414px; height: 100vh; background-color: #121212; position: relative; display: flex; flex-direction: column; box-shadow: 0 0 20px rgba(255, 255, 255, 0.05); overflow: hidden; }
+        .header { padding: 15px 20px; background-color: #1e1e1e; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
+        .header-title { font-size: 18px; font-weight: bold; color: #e2e8f0; display: flex; align-items: center; gap: 10px; }
+        .header-title i { color: #38bdf8; }
+        .content { flex: 1; overflow-y: auto; padding: 15px; padding-bottom: 80px; }
+        .content::-webkit-scrollbar { display: none; }
+        .ai-summary { background: linear-gradient(145deg, rgba(56, 189, 248, 0.15), rgba(56, 189, 248, 0.05)); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 12px; padding: 15px; margin-bottom: 15px; position: relative; }
+        .ai-summary-header { display: flex; align-items: center; gap: 8px; color: #38bdf8; font-weight: bold; margin-bottom: 8px; font-size: 15px; }
+        .ai-summary p { margin: 0; font-size: 14px; color: #e2e8f0; line-height: 1.5; }
+        .feed-column { display: flex; flex-direction: column; gap: 12px; }
+        .comment-card { background-color: #1e1e1e; border-radius: 10px; padding: 12px; border: 1px solid #2a2a2a; animation: fadeIn 0.4s ease-in-out; }
+        @keyframes skeleton-pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+        .skeleton-block { background-color: #2a2a2a; border-radius: 6px; animation: skeleton-pulse 1.4s ease-in-out infinite; }
+        .skeleton-post-card { background-color: #1e1e1e; border-radius: 10px; padding: 12px; border: 1px solid #2a2a2a; margin-bottom: 12px; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .user-info { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+        .user-profile { display: flex; align-items: center; gap: 8px; }
+        .avatar { width: 32px; height: 32px; background-color: #334155; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #a0a0a0; }
+        .user-name { font-size: 13px; font-weight: bold; color: #e2e8f0; }
+        .time-ago { font-size: 11px; color: #64748b; }
+        .sentiment-badge { font-size: 11px; padding: 3px 8px; border-radius: 12px; font-weight: bold; }
+        .badge-sad { background-color: rgba(239, 68, 68, 0.1); color: #ef4444; }
+        .badge-happy { background-color: rgba(34, 197, 94, 0.1); color: #22c55e; }
+        .badge-neutral { background-color: rgba(234, 179, 8, 0.1); color: #eab308; }
+        .stock-tag { display: inline-block; color: #38bdf8; background-color: rgba(56, 189, 248, 0.1); padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-bottom: 6px; font-weight: bold; }
+        .comment-text { font-size: 13px; color: #cbd5e1; margin-bottom: 10px; line-height: 1.4; word-break: break-all; }
+        .comment-actions { display: flex; gap: 15px; color: #64748b; font-size: 12px; align-items: center; }
+        .comment-actions span { cursor: pointer; transition: color 0.2s; }
+        .comment-actions span:hover, .comment-actions span.liked { color: #38bdf8; }
+        .side-panel { display: flex; flex-direction: column; gap: 12px; }
+        .side-card { background-color: #1e1e1e; border-radius: 10px; padding: 12px; border: 1px solid #2a2a2a; border-top: 3px solid #f59e0b; }
+        .side-title { font-size: 14px; font-weight: bold; color: #e2e8f0; margin-bottom: 10px; }
+        .trending-list { list-style: none; padding: 0; margin: 0; }
+        .trending-list li { font-size: 12px; color: #cbd5e1; margin-bottom: 8px; display: flex; justify-content: space-between; }
+        .fire-icon { color: #f59e0b; font-size: 10px; }
+        .fab-button { position: absolute; bottom: 75px; right: 20px; background: linear-gradient(135deg, #4f46e5, #38bdf8); color: white; border: none; border-radius: 25px; padding: 10px 20px; font-size: 14px; font-weight: bold; box-shadow: 0 4px 15px rgba(56, 189, 248, 0.4); cursor: pointer; display: flex; align-items: center; gap: 8px; z-index: 10; transition: 0.3s; }
+        .fab-button:hover { transform: scale(1.05); }
+        .modal-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(5px); display: none; justify-content: center; align-items: center; z-index: 100; }
+        .modal-content { background-color: #1e1e1e; border: 1px solid #333; border-radius: 15px; width: 85%; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); animation: slideUp 0.3s ease-out; }
+        @keyframes slideUp { from { transform: translateY(30px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .modal-header { font-size: 18px; font-weight: bold; color: white; margin-bottom: 15px; display: flex; justify-content: space-between;}
+        .close-btn { color: #a0a0a0; cursor: pointer; font-size: 20px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; font-size: 13px; color: #cbd5e1; margin-bottom: 6px; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px; background-color: #0f172a; border: 1px solid #334155; border-radius: 8px; color: white; box-sizing: border-box; outline: none; font-family: inherit; }
+        .form-group textarea { resize: none; height: 100px; }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: #38bdf8; }
+        .submit-btn { width: 100%; padding: 12px; background: linear-gradient(135deg, #0ea5e9, #2563eb); border: none; border-radius: 8px; color: white; font-weight: bold; font-size: 15px; cursor: pointer; }
+        .bottom-nav { position: absolute; bottom: 0; width: 100%; background-color: #1e1e1e; display: flex; justify-content: space-around; padding: 10px 0; border-top: 1px solid #333; z-index: 20; }
+        .nav-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px; color: #94a3b8; font-size: 12px; text-decoration: none; }
+        .nav-item.active { color: #38bdf8; text-shadow: 0 0 10px rgba(56, 189, 248, 0.5); }
+        .nav-item i { font-size: 20px; }
+        .nav-badge-dot { position: absolute; top: 0; left: 55%; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; border: 1.5px solid #1e1e1e; display: none; }
+        .nav-badge-dot.show { display: block; }
+        .header-badge-dot { position: absolute; top: -2px; right: -4px; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; border: 1.5px solid #1e1e1e; display: none; }
+        .header-badge-dot.show { display: block; }
+
+        /* 留言區專屬樣式 */
+        .reply-section { display: none; margin-top: 12px; border-top: 1px solid #2a2a2a; padding-top: 12px; }
+        .reply-item { background-color: #2a2a2a; padding: 10px; border-radius: 8px; margin-bottom: 8px; font-size: 13px; color: #cbd5e1; }
+        .reply-author { font-weight: bold; color: #38bdf8; margin-right: 5px; }
+        .reply-input-container { display: flex; gap: 8px; margin-top: 10px; }
+        .reply-input { flex: 1; padding: 8px 12px; border-radius: 20px; border: 1px solid #444; background-color: #121212; color: white; outline: none; font-size: 13px; }
+        .reply-input:focus { border-color: #38bdf8; }
+        .reply-submit-btn { background-color: #38bdf8; color: #000; border: none; padding: 0 15px; border-radius: 20px; cursor: pointer; font-weight: bold; font-size: 13px; }
+            .rip-btn { position: relative; overflow: hidden; }
+        .rip-ink { position: absolute; border-radius: 50%; background: rgba(255,255,255,0.35); pointer-events: none; transform: scale(0); opacity: 0.6; transition: transform 0.55s ease, opacity 0.55s ease; }
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        <div class="header">
+            <div class="header-title"><i class="fas fa-users"></i> 社群與輿情</div>
+            <div style="display: flex; align-items: center;">
+                <button id="sortBtn" onclick="toggleSort()" style="background: none; border: 1px solid #38bdf8; color: #38bdf8; border-radius: 12px; padding: 4px 10px; font-size: 12px; cursor: pointer; margin-right: 15px;">最新排序</button>
+                <a href="profile.html" style="color: #a0a0a0; text-decoration: none; font-size: 18px; position: relative;"><i class="fas fa-user-circle"></i><span class="header-badge-dot" id="profileBadgeDot"></span></a>
+            </div>
+        </div>
+
+        <div class="content">
+
+            <div class="side-panel" style="margin-bottom: 15px;">
+                <div class="side-card">
+                    <div class="side-title"><i class="fas fa-fire" style="color: #f59e0b; margin-right: 5px;"></i>熱門討論</div>
+                    <ul class="trending-list" id="trendingList">
+                        <li>載入中...</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="feed-column" id="feedContainer">
+                <div class="skeleton-post-card">
+                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+                        <div class="skeleton-block" style="width:32px; height:32px; border-radius:50%;"></div>
+                        <div class="skeleton-block" style="height:12px; width:35%;"></div>
+                    </div>
+                    <div class="skeleton-block" style="height:12px; width:90%; margin-bottom:6px;"></div>
+                    <div class="skeleton-block" style="height:12px; width:60%;"></div>
+                </div>
+                <div class="skeleton-post-card">
+                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+                        <div class="skeleton-block" style="width:32px; height:32px; border-radius:50%;"></div>
+                        <div class="skeleton-block" style="height:12px; width:30%;"></div>
+                    </div>
+                    <div class="skeleton-block" style="height:12px; width:80%; margin-bottom:6px;"></div>
+                    <div class="skeleton-block" style="height:12px; width:50%;"></div>
+                </div>
+            </div>
+        </div>
+
+        <button type="button" class="fab-button" onclick="openModal()">
+            <i class="fas fa-pen"></i> 發新討論
+        </button>
+
+        <div class="modal-overlay" id="postModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <span>發表新觀點</span>
+                    <i class="fas fa-times close-btn" onclick="closeModal()"></i>
+                </div>
+                <div class="form-group">
+                    <label>相關標的 (例如: 2330 台積電)</label>
+                    <input type="text" id="postTag" placeholder="請輸入股票代號或名稱">
+                </div>
+                <div class="form-group">
+                    <label>你的看法 (情緒)</label>
+                    <select id="postSentiment">
+                        <option value="happy">😃 樂觀 (看多)</option>
+                        <option value="neutral" selected>😐 中性 (觀望)</option>
+                        <option value="sad">😥 悲觀 (看空)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>內容</label>
+                    <textarea id="postContent" placeholder="想和大家分享什麼呢？..."></textarea>
+                </div>
+                <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
+                    <label for="postImage" style="background: #334155; padding: 8px 12px; border-radius: 8px; cursor: pointer; color: white; display: inline-block; margin: 0;">
+                        <i class="fas fa-camera"></i> 上傳圖片 (對帳單/K線圖)
+                    </label>
+                    <input type="file" id="postImage" accept="image/*" style="display: none;" onchange="previewImage(this)">
+                    <span id="imageName" style="font-size: 12px; color: #a0a0a0;">未選擇檔案</span>
+                </div>
+                <div id="imagePreviewContainer" style="display: none; margin-bottom: 15px;">
+                    <img id="imagePreview" src="" style="max-width: 100%; border-radius: 8px; max-height: 150px; object-fit: contain; border: 1px solid #334155;">
+                </div>
+                <button type="button" class="submit-btn rip-btn" id="submitBtn" onclick="submitPost()">發佈文章</button>
+            </div>
+        </div>
+
+        <div class="bottom-nav">
+            <a href="dashboard.html" class="nav-item"><i class="fas fa-chart-line"></i><span>看盤</span></a>
+            <a href="selection.html" class="nav-item"><i class="fas fa-search-dollar"></i><span>選股</span></a>
+            <a href="ai_analysis.html" class="nav-item"><i class="fas fa-microchip"></i><span>AI分析</span></a>
+            <a href="community.html" class="nav-item active"><i class="fas fa-users"></i><span>社群</span></a>
+            <a href="education.html" class="nav-item"><i class="fas fa-book-open"></i><span>教學</span></a>
+        </div>
+    </div>
+
+    <script>
+        // 設定指向後端 API，確保熱門討論與上傳功能正常對接
+        const API_BASE_URL = "https://128gzb5evxna.shares.zrok.io";
+
+        // --- JWT Auth Interceptor ---
+        const originalFetch = window.fetch;
+        window.fetch = async function() {
+            let [resource, config] = arguments;
+            if(typeof resource === 'string' && resource.includes(API_BASE_URL)) {
+                config = config || {};
+                config.headers = config.headers || {};
+                config.headers['skip_zrok_interstitial'] = 'true';
+                const token = localStorage.getItem('access_token');
+                if (token) {
+                    config.headers['Authorization'] = 'Bearer ' + token;
+                }
+            }
+            const response = await originalFetch(resource, config);
+            if(response.status === 401 && !resource.includes('/api/auth/login') && !resource.includes('/api/auth/register')) {
+                alert('登入已過期或權限不足，請重新登入');
+                window.location.href = 'login.html';
+            }
+            return response;
+        };
+        // -----------------------------
+ 
+        const LIKED_KEY = 'proquant_liked_posts'; 
+        
+        let postsData = [];
+        let likedPosts = [];
+        let openReplyIds = new Set();
+        let lastPostsJson = "";
+        let sortBy = 'newest'; // 'newest' 或 'popular'
+        let currentUserEmail = null;
+        let blockedEmails = new Set();
+
+        async function loadCurrentUserAndBlocks() {
+            const token = localStorage.getItem('access_token');
+            if (!token) return;
+            try {
+                const [meRes, blocksRes] = await Promise.all([
+                    fetch(`${API_BASE_URL}/api/user/me`),
+                    fetch(`${API_BASE_URL}/api/blocks`)
+                ]);
+                if (meRes.ok) {
+                    const me = await meRes.json();
+                    currentUserEmail = me.email;
+                }
+                if (blocksRes.ok) {
+                    const blocks = await blocksRes.json();
+                    blockedEmails = new Set(blocks.blocked || []);
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        const storedLikes = localStorage.getItem(LIKED_KEY);
+        if (storedLikes) {
+            likedPosts = JSON.parse(storedLikes);
+        }
+
+        function timeAgo(timestamp) {
+            const diff = Date.now() - timestamp;
+            const minutes = Math.floor(diff / 60000);
+            if (minutes < 1) return '剛剛';
+            if (minutes < 60) return `${minutes} 分鐘前`;
+            const hours = Math.floor(minutes / 60);
+            if (hours < 24) return `${hours} 小時前`;
+            return `${Math.floor(hours / 24)} 天前`;
+        }
+
+        function getSentimentStyle(sentiment) {
+            if (sentiment === 'happy') return { text: '😃 樂觀', class: 'badge-happy' };
+            if (sentiment === 'sad') return { text: '😥 悲觀', class: 'badge-sad' };
+            return { text: '😐 中性', class: 'badge-neutral' };
+        }
+
+        function toggleSort() {
+            sortBy = sortBy === 'newest' ? 'popular' : 'newest';
+            document.getElementById('sortBtn').innerText = sortBy === 'newest' ? '最新排序' : '熱門排序';
+            renderPosts();
+        }
+
+        async function loadTrending() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/trending_tags`);
+                if (response.ok) {
+                    const data = await response.json();
+                    const listEl = document.getElementById('trendingList');
+                    listEl.innerHTML = '';
+                    data.trending.forEach((tag, idx) => {
+                        let fires = '<i class="fas fa-fire"></i>'.repeat(Math.max(1, 4 - idx));
+                        listEl.innerHTML += `<li>${idx + 1}. <a href="dashboard.html?symbol=${tag}" style="color: #cbd5e1; text-decoration: none;">${tag}</a> <span class="fire-icon">${fires}</span></li>`;
+                    });
+                }
+            } catch (e) {
+                console.warn("載入熱門討論失敗", e);
+            }
+        }
+
+        // 完全依賴伺服器資料（防閃爍優化版）
+        async function loadPosts() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/posts`);
+                if (!response.ok) throw new Error("伺服器回應錯誤");
+                
+                let newData = await response.json();
+
+                // 過濾掉被自己封鎖的使用者發的文
+                if (blockedEmails.size > 0) {
+                    newData = newData.filter(p => !p.user_email || !blockedEmails.has(p.user_email));
+                }
+
+                const newJson = JSON.stringify(newData);
+
+                // 只有資料發生變化時才重新渲染UI，避免畫面定時重載時閃爍
+                if (newJson !== lastPostsJson) {
+                    postsData = newData;
+                    lastPostsJson = newJson;
+                    renderPosts();
+                }
+            } catch (error) {
+                console.error("無法連線伺服器:", error);
+                document.getElementById('feedContainer').innerHTML = 
+                    '<div style="text-align:center; color:#ef4444; margin-top:20px; font-size:14px;">無法連線至伺服器<br><span style="font-size:12px; color:#94a3b8;">請確認後端 API 已啟動</span></div>';
+            }
+        }
+
+        function renderPosts() {
+            const container = document.getElementById('feedContainer');
+            container.innerHTML = ''; 
+
+            if(postsData.length === 0) {
+                container.innerHTML = '<div style="text-align:center; color:#94a3b8; margin-top:20px; font-size:14px;">目前還沒有討論，快來發布第一篇文章吧！</div>';
+                return;
+            }
+
+            let sortedPosts = [...postsData];
+            if (sortBy === 'newest') {
+                sortedPosts = sortedPosts.sort((a, b) => b.time - a.time);
+            } else {
+                sortedPosts = sortedPosts.sort((a, b) => (b.likes || 0) - (a.likes || 0));
+            }
+
+            sortedPosts.forEach(post => {
+                const sentimentInfo = getSentimentStyle(post.sentiment);
+                const tagHtml = post.tag ? `<div class="stock-tag">${post.tag}</div>` : '';
+                const isLiked = likedPosts.includes(post.id);
+                const likeClass = isLiked ? 'liked' : '';
+                const likeIcon = isLiked ? 'fas' : 'far';
+
+                const replies = post.replies || [];
+                let repliesHtml = '';
+                if (replies.length > 0) {
+                    repliesHtml = replies.map(r => `
+                        <div class="reply-item">
+                            <span class="reply-author">${r.author || '匿名'}:</span> ${r.content}
+                            ${r.time ? `<span style="font-size: 10px; color: #64748b; float: right; margin-top: 2px;">${r.time}</span>` : ''}
+                            <div style="clear: both;"></div>
+                            ${currentUserEmail ? `<div style="text-align:right; margin-top:4px;"><span onclick="reportReply(${r.id})" style="font-size:11px; color:#64748b; cursor:pointer;"><i class="fas fa-flag"></i> 檢舉</span></div>` : ''}
+                        </div>
+                    `).join('');
+                } else {
+                    repliesHtml = '<div style="color: #64748b; font-size: 12px; text-align: center; margin-bottom: 10px;">成為第一個留言的人吧！</div>';
+                }
+                const displayStyle = openReplyIds.has(post.id) ? 'block' : 'none';
+                const commentsCount = replies.length > 0 ? replies.length : (post.comments || 0);
+
+                // 用真實 email 判斷是不是自己的貼文，而不是比對顯示名稱（顯示名稱可能重複）
+                const isOwnPost = currentUserEmail && post.user_email === currentUserEmail;
+                const deleteHtml = isOwnPost ? `<span onclick="deletePost(${post.id})" style="color: #ef4444;"><i class="fas fa-trash"></i> 刪除</span>` : '';
+                const reportBlockHtml = (!isOwnPost && currentUserEmail) ? `
+                    <span onclick="reportPost(${post.id})"><i class="fas fa-flag"></i> 檢舉</span>
+                    ${post.user_email ? `<span onclick="blockUser('${post.user_email}', '${post.user}')"><i class="fas fa-user-slash"></i> 封鎖</span>` : ''}
+                ` : '';
+
+                // 股票代號自動超連結 (尋找 4 位數字)，避開 HTML 標籤內部的屬性 (如圖片網址)
+                let displayContent = post.content.replace(/(?![^<]*>)([0-9]{4})/g, '<a href="dashboard.html?symbol=$1" style="color: #38bdf8; text-decoration: none; font-weight: bold; border-bottom: 1px dashed #38bdf8;">$1</a>');
+
+                const html = `
+                <div class="comment-card">
+                    <div class="user-info">
+                        <div class="user-profile">
+                            <div class="avatar"><i class="fas ${post.icon || 'fa-user'}"></i></div>
+                            <div>
+                                <div class="user-name">${post.user}</div>
+                                <div class="time-ago">${timeAgo(post.time)}</div>
+                            </div>
+                        </div>
+                        <div class="sentiment-badge ${sentimentInfo.class}">${sentimentInfo.text}</div>
+                    </div>
+                    ${tagHtml}
+                    <div class="comment-text">${displayContent}</div>
+                    <div class="comment-actions">
+                        <span class="${likeClass}" onclick="toggleLike(${post.id})">
+                            <i class="${likeIcon} fa-thumbs-up"></i> ${post.likes || 0}
+                        </span>
+                        <span onclick="toggleReplies(${post.id})"><i class="far fa-comment"></i> ${commentsCount} 回覆</span>
+                        ${reportBlockHtml}
+                        <span style="margin-left: auto;">${deleteHtml}</span>
+                    </div>
+                    
+                    <div class="reply-section" id="reply-section-${post.id}" style="display: ${displayStyle};">
+                        <div>${repliesHtml}</div>
+                        <div class="reply-input-container">
+                            <input type="text" id="reply-input-${post.id}" class="reply-input" placeholder="留個言吧...">
+                            <button class="reply-submit-btn" onclick="submitReply(${post.id})" id="reply-btn-${post.id}">送出</button>
+                        </div>
+                    </div>
+                </div>`;
+                container.innerHTML += html;
+            });
+        }
+
+        function toggleReplies(postId) {
+            const section = document.getElementById(`reply-section-${postId}`);
+            if (openReplyIds.has(postId)) {
+                openReplyIds.delete(postId);
+                section.style.display = 'none';
+            } else {
+                openReplyIds.add(postId);
+                section.style.display = 'block';
+            }
+        }
+
+        // 留言發送至伺服器（動態帶入自訂姓名）
+        async function submitReply(postId) {
+            const inputEl = document.getElementById(`reply-input-${postId}`);
+            const btnEl = document.getElementById(`reply-btn-${postId}`);
+            const content = inputEl.value.trim();
+            if (!content) return; 
+
+            // 動態讀取當前登入者名稱
+            const currentUserName = localStorage.getItem('currentUser_name') || "投資人";
+
+            btnEl.innerText = "傳送中...";
+            btnEl.disabled = true;
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/posts/${postId}/reply`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        content: content, 
+                        author: currentUserName, 
+                        time: new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }) 
+                    })
+                });
+
+                if (!response.ok) throw new Error("留言失敗");
+                
+                inputEl.value = '';
+                openReplyIds.add(postId); 
+                lastPostsJson = ""; // 確保重載觸發畫面更新
+                await loadPosts(); 
+
+            } catch (e) {
+                console.warn("留言同步伺服器失敗", e);
+                alert("留言失敗，請確認網路連線或伺服器狀態");
+            } finally {
+                btnEl.innerText = "送出";
+                btnEl.disabled = false;
+            }
+        }
+
+        // 發布新文章（整合圖片上傳與自訂姓名）
+        async function submitPost() {
+            const tag = document.getElementById('postTag').value.trim();
+            const sentiment = document.getElementById('postSentiment').value;
+            const content = document.getElementById('postContent').value.trim();
+            const btn = document.getElementById('submitBtn');
+            const fileInput = document.getElementById('postImage');
+
+            if (!content) {
+                alert('請輸入內文喔！');
+                return;
+            }
+
+            // 動態讀取當前登入者名稱
+            const currentUserName = localStorage.getItem('currentUser_name') || "投資人";
+
+            btn.innerText = "發佈中...";
+            btn.disabled = true;
+            
+            try {
+                let finalContent = content;
+                // 若有夾帶圖片檔案，先呼叫 API 上傳圖片
+                if (fileInput.files.length > 0) {
+                    const formData = new FormData();
+                    formData.append("file", fileInput.files[0]);
+                    
+                    btn.innerText = "上傳圖片中...";
+                    const uploadRes = await fetch(`${API_BASE_URL}/api/upload`, {
+                        method: 'POST',
+                        body: formData
+                    });
+                    if (uploadRes.ok) {
+                        const uploadData = await uploadRes.json();
+                        if (uploadData.status === 'success') {
+                            // 成功取得圖片網址後直接拼接至內文結尾
+                            finalContent += `<br><img src="${API_BASE_URL}${uploadData.url}" style="max-width:100%; border-radius:8px; margin-top:10px;">`;
+                        }
+                    } else {
+                        throw new Error("圖片上傳失敗");
+                    }
+                }
+
+                const newPost = {
+                    id: Date.now(), 
+                    user: currentUserName, 
+                    icon: "fa-user-circle", 
+                    time: Date.now(),
+                    sentiment: sentiment,
+                    tag: tag,
+                    content: finalContent,
+                    likes: 0,
+                    comments: 0,
+                    replies: []
+                };
+
+                btn.innerText = "儲存文章中...";
+                const response = await fetch(`${API_BASE_URL}/api/posts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(newPost)
+                });
+                
+                if (!response.ok) throw new Error("傳送失敗");
+                
+                lastPostsJson = ""; // 強制刷新渲染
+                await loadPosts(); 
+                closeModal();
+                document.querySelector('.content').scrollTo({ top: 0, behavior: 'smooth' });
+
+            } catch (error) {
+                alert("發佈失敗，請確認伺服器連線狀態！");
+            } finally {
+                btn.innerText = "發佈文章";
+                btn.disabled = false;
+            }
+        }
+
+        // 按讚同步至伺服器
+        async function toggleLike(postId) {
+            const postIndex = postsData.findIndex(p => p.id === postId);
+            if (postIndex === -1) return;
+
+            const likedIndex = likedPosts.indexOf(postId);
+            const isLiking = likedIndex === -1;
+
+            if (isLiking) {
+                postsData[postIndex].likes = (postsData[postIndex].likes || 0) + 1;
+                likedPosts.push(postId);
+            } else {
+                postsData[postIndex].likes = Math.max(0, (postsData[postIndex].likes || 1) - 1);
+                likedPosts.splice(likedIndex, 1);
+            }
+            
+            localStorage.setItem(LIKED_KEY, JSON.stringify(likedPosts));
+            renderPosts(); 
+
+            try {
+                await fetch(`${API_BASE_URL}/api/posts/${postId}/like`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: isLiking ? 'like' : 'unlike' })
+                });
+                lastPostsJson = ""; 
+            } catch (e) {
+                console.warn("按讚同步至伺服器失敗", e);
+            }
+        }
+
+        // 刪除貼文功能 (24小時內)
+        async function deletePost(postId) {
+            if (!confirm("確定要刪除這篇貼文嗎？")) return;
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/posts/${postId}`, { 
+                    method: 'DELETE' 
+                });
+                if (!response.ok) throw new Error("刪除失敗");
+                
+                lastPostsJson = ""; // 強制觸發 UI 重新整理
+                await loadPosts();
+            } catch (error) {
+                alert("刪除失敗，請確認伺服器連線狀態");
+            }
+        }
+
+        // 檢舉貼文
+        async function reportPost(postId) {
+            const reason = prompt("請簡短說明檢舉原因（例如：垃圾廣告、人身攻擊、不實資訊）：");
+            if (!reason || !reason.trim()) return;
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/posts/${postId}/report`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason: reason.trim() })
+                });
+                if (!res.ok) throw new Error('檢舉失敗');
+                alert('已收到您的檢舉，我們會盡快處理');
+            } catch (err) {
+                console.error(err);
+                alert('檢舉失敗，請稍後再試');
+            }
+        }
+
+        // 檢舉留言
+        async function reportReply(replyId) {
+            const reason = prompt("請簡短說明檢舉原因：");
+            if (!reason || !reason.trim()) return;
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/replies/${replyId}/report`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason: reason.trim() })
+                });
+                if (!res.ok) throw new Error('檢舉失敗');
+                alert('已收到您的檢舉，我們會盡快處理');
+            } catch (err) {
+                console.error(err);
+                alert('檢舉失敗，請稍後再試');
+            }
+        }
+
+        // 封鎖使用者：封鎖後其貼文會從動態中消失
+        async function blockUser(targetEmail, displayName) {
+            if (!confirm(`封鎖「${displayName}」後，將不會再看到這位使用者的貼文，確定要封鎖嗎？`)) return;
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/blocks/${encodeURIComponent(targetEmail)}`, { method: 'POST' });
+                if (!res.ok) throw new Error('封鎖失敗');
+                blockedEmails.add(targetEmail);
+                lastPostsJson = ""; // 強制重新渲染，濾掉這個使用者的貼文
+                await loadPosts();
+                alert('已封鎖該使用者');
+            } catch (err) {
+                console.error(err);
+                alert('封鎖失敗，請稍後再試');
+            }
+        }
+
+        function openModal() { document.getElementById('postModal').style.display = 'flex'; }
+        function closeModal() {
+            document.getElementById('postModal').style.display = 'none';
+            document.getElementById('postTag').value = '';
+            document.getElementById('postContent').value = '';
+            document.getElementById('postSentiment').value = 'neutral';
+            document.getElementById('postImage').value = '';
+            document.getElementById('imageName').innerText = '未選擇檔案';
+            document.getElementById('imagePreviewContainer').style.display = 'none';
+        }
+
+        // 圖片選取預覽功能
+        function previewImage(input) {
+            if (input.files && input.files[0]) {
+                document.getElementById('imageName').innerText = input.files[0].name;
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    document.getElementById('imagePreview').src = e.target.result;
+                    document.getElementById('imagePreviewContainer').style.display = 'block';
+                }
+                reader.readAsDataURL(input.files[0]);
+            } else {
+                document.getElementById('imageName').innerText = '未選擇檔案';
+                document.getElementById('imagePreviewContainer').style.display = 'none';
+            }
+        }
+
+        // 底部導覽列未讀紅點：比對後端資料是否有比「上次查看時間」更新的內容
+        async function checkBadgeStatus() {
+            const token = localStorage.getItem('access_token');
+            if (!token) return;
+
+            let communitySince = localStorage.getItem('community_badge_seen');
+            if (!communitySince) {
+                communitySince = new Date().toISOString();
+                localStorage.setItem('community_badge_seen', communitySince);
+            }
+            let repliesSince = localStorage.getItem('notif_badge_seen');
+            if (!repliesSince) {
+                repliesSince = new Date().toISOString();
+                localStorage.setItem('notif_badge_seen', repliesSince);
+            }
+
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/notifications/badge_status?community_since=${encodeURIComponent(communitySince)}&replies_since=${encodeURIComponent(repliesSince)}`);
+                const data = await res.json();
+                if (data.status !== 'success') return;
+
+                const communityDot = document.getElementById('communityBadgeDot');
+                if (communityDot) communityDot.classList.toggle('show', !!data.has_new_community_posts);
+
+                const profileDot = document.getElementById('profileBadgeDot');
+                if (profileDot) profileDot.classList.toggle('show', !!data.has_new_replies_to_me);
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        window.onload = async () => {
+            await loadCurrentUserAndBlocks(); // 先知道自己是誰、封鎖了誰，貼文才能正確過濾與顯示刪除鈕
+            loadTrending();
+            loadPosts();
+            setInterval(loadPosts, 10000);
+            setInterval(loadTrending, 24 * 60 * 60 * 1000);
+
+            // 使用者正在看社群動態，視為「已讀」，清掉社群跟回覆的未讀紅點
+            const now = new Date().toISOString();
+            localStorage.setItem('community_badge_seen', now);
+            localStorage.setItem('notif_badge_seen', now);
+            checkBadgeStatus();
+        };
+    </script>
+    <script>
+        document.addEventListener('click', function(e) {
+            const btn = e.target.closest('.rip-btn');
+            if (!btn) return;
+            const rect = btn.getBoundingClientRect();
+            const size = Math.max(rect.width, rect.height) * 2;
+            const ink = document.createElement('span');
+            ink.className = 'rip-ink';
+            ink.style.width = ink.style.height = size + 'px';
+            ink.style.left = (e.clientX - rect.left - size / 2) + 'px';
+            ink.style.top = (e.clientY - rect.top - size / 2) + 'px';
+            btn.appendChild(ink);
+            requestAnimationFrame(() => { ink.style.transform = 'scale(1)'; ink.style.opacity = '0'; });
+            setTimeout(() => ink.remove(), 600);
+        });
+    </script>
+</body>
+</html>
