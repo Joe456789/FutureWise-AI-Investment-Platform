@@ -1,4 +1,4 @@
-# 程式名稱：ProQuant 正式版後端 API 伺服器 (MySQL 雲端版 + AI 預測)
+# 程式名稱：FutureWise 正式版後端 API 伺服器 (MySQL 雲端版 + AI 預測)
 from fastapi import FastAPI, HTTPException, Depends, status
 from pydantic import BaseModel
 from passlib.context import CryptContext
@@ -38,7 +38,7 @@ engine = create_engine(MYSQL_CONN_STR, pool_pre_ping=True)
 if GEMINI_API_KEY and GEMINI_API_KEY != "在這裡填入您的金鑰":
     genai.configure(api_key=GEMINI_API_KEY)
 
-app = FastAPI(title="ProQuant AI API Terminal", version="3.0.0")
+app = FastAPI(title="FutureWise AI API Terminal", version="3.0.0")
 
 # 允許前端讀取上傳的圖片
 app.mount("/uploads", StaticFiles(directory=os.path.join(current_dir, "uploads")), name="uploads")
@@ -133,7 +133,7 @@ model = xgb.XGBClassifier()
 
 try:
     model.load_model(os.path.join(current_dir, "model_universal.json"))
-    print("🧠 成功載入 ProQuant 終極通用模型大腦！")
+    print("🧠 成功載入 FutureWise 終極通用模型大腦！")
 except Exception as e:
     print(f"⚠️ 模型載入失敗，請確認 model_universal.json 檔案是否存在。錯誤：{e}")
 
@@ -467,7 +467,7 @@ def login_user(user: UserLogin):
 # ==========================================
 @app.get("/")
 def read_root():
-    return {"status": "Online", "message": "ProQuant API Server is running safely on Oracle Cloud."}
+    return {"status": "Online", "message": "FutureWise API Server is running safely on Oracle Cloud."}
 
 class GeminiQuery(BaseModel):
     query: str
@@ -481,7 +481,7 @@ async def gemini_chat(data: GeminiQuery, current_user: str = Depends(get_current
     context_str = ""
     if data.ticker:
         ticker = data.ticker.strip()
-        context_str = f"【ProQuant 系統實時偵測到個股代號：{ticker}】\n"
+        context_str = f"【FutureWise 系統實時偵測到個股代號：{ticker}】\n"
         
         # 1. 抓取基本面數據 (使用 yfinance)
         try:
@@ -559,7 +559,7 @@ async def gemini_chat(data: GeminiQuery, current_user: str = Depends(get_current
                 
                 context_str += (
                     f"- 最新收盤價：{close_p}\n"
-                    f"- ProQuant XGBoost AI 短線預測：{prediction_result} (上漲勝率: {up_confidence:.2f}%)\n"
+                    f"- FutureWise XGBoost AI 短線預測：{prediction_result} (上漲勝率: {up_confidence:.2f}%)\n"
                     f"- 輿情情緒指標：{sentiment:.2f} (影響調整分: {sentiment_adj*100:+.2f}%)\n"
                 )
         except Exception as e:
@@ -568,7 +568,7 @@ async def gemini_chat(data: GeminiQuery, current_user: str = Depends(get_current
     # 組合 System Prompt 餵給 Gemini
     # 設計重點：先直接回答問題本身，再用1~2個重點數據佐證，避免一般人看不懂的資料堆疊
     system_prompt = (
-        "你是 ProQuant 的 AI 助理，要讓完全不懂投資的一般人也看得懂你的回答。\n"
+        "你是 FutureWise 的 AI 助理，要讓完全不懂投資的一般人也看得懂你的回答。\n"
         "回答規則：\n"
         "1. 第一句話一定要先直接回答使用者的問題本身。例如被問「會不會漲」，第一句就要明確講看漲、看跌、或持平，不要先鋪陳數據、不要顧左右而言他。\n"
         "2. 接著用 1~3 句白話文說明主要原因，只挑最相關的 1~2 個數據佐證（例如 AI 預測信心指數、近期漲跌趨勢），不要把下方提供的所有數據逐項列出來。\n"
@@ -579,7 +579,7 @@ async def gemini_chat(data: GeminiQuery, current_user: str = Depends(get_current
     )
     
     if context_str:
-        system_prompt += f"[ProQuant 系統實時偵測個股數據]\n{context_str}\n\n"
+        system_prompt += f"[FutureWise 系統實時偵測個股數據]\n{context_str}\n\n"
         
     full_prompt = f"{system_prompt}使用者提出的問題或指令：\n{data.query}"
     
@@ -1696,6 +1696,6 @@ def get_badge_status(community_since: Optional[str] = None, replies_since: Optio
         return {"status": "error", "message": f"讀取失敗: {str(e)}"}
 
 if __name__ == "__main__":
-    print("🚀 ProQuant 後端服務正在啟動... (支援高併發模式)")
+    print("🚀 FutureWise 後端服務正在啟動... (支援高併發模式)")
     # 使用字串啟動以支援多進程 worker，預設開啟 4 個進程來處理萬人連線
     uvicorn.run("stock_api_server:app", host="0.0.0.0", port=8000, workers=4)

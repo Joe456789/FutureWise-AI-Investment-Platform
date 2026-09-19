@@ -1,4 +1,4 @@
-# 程式名稱：ProQuant 每日快充引擎 (V8.5 籌碼精準修復版)
+# 程式名稱：FutureWise 每日快充引擎 (V8.5 籌碼精準修復版)
 # 核心升級：
 # 1. 精準日期對齊：以 K 線實際的「交易日」推算 60 天前的日期向 FinMind 請求，解決日曆天與交易日的落差。
 # 2. 破除截斷陷阱：統一使用 TARGET_SAVE_DAYS 變數，保證抓幾天就存幾天，資料不再丟失。
@@ -179,7 +179,7 @@ def run_v8_5_engine():
     # ==========================================
     TARGET_SAVE_DAYS = 60 
     
-    print(f"🚀 ProQuant V8.5 啟動 | 目標: 全市場 {len(tickers)} 支股票")
+    print(f"🚀 FutureWise V8.5 啟動 | 目標: 全市場 {len(tickers)} 支股票")
     print(f"⚠️ 設定儲存與修補天數為: {TARGET_SAVE_DAYS} 個交易日")
     print("   👉 預計總耗時約 3 小時，請將電腦保持開機狀態讓它在背景執行。")
     

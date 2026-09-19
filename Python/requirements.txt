@@ -1,4 +1,4 @@
-# ProQuant 後端執行環境需要的套件
+# FutureWise 後端執行環境需要的套件
 # 安裝：pip install -r requirements.txt
 #
 # 注意：plotly、streamlit 沒有列在這裡，因為只有 stock_ai_web_app.py（已淘汰的舊 Streamlit 原型，

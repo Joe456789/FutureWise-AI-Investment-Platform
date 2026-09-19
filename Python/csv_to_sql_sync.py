@@ -1,4 +1,4 @@
-# 程式名稱：ProQuant 雙機同步工具 (自動切換 雲端MySQL / 本機SSMS 版)
+# 程式名稱：FutureWise 雙機同步工具 (自動切換 雲端MySQL / 本機SSMS 版)
 import pandas as pd
 from sqlalchemy import create_engine, text, exc
 import os

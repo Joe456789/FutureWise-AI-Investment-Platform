@@ -1,4 +1,4 @@
-# 程式名稱：ProQuant 重大訊息爬蟲
+# 程式名稱：FutureWise 重大訊息爬蟲
 # 資料來源：證交所 OpenAPI（免費、官方、不需金鑰）
 #   https://openapi.twse.com.tw/v1/opendata/t187ap04_L
 # 這支只回傳「當天」公告的重大訊息，所以要排進 crontab 每天跑一次累積成歷史資料。

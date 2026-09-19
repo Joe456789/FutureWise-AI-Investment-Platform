@@ -1,4 +1,4 @@
-# 程式名稱：ProQuant 全自動快充引擎 (V9.8 SSL破案版)
+# 程式名稱：FutureWise 全自動快充引擎 (V9.8 SSL破案版)
 # 核心修正：
 # 1. SSL 破案：在抓取籌碼的請求中加入 verify=False，解決證交所憑證被 Python 擋下的問題。
 # 2. 拒絕篩選：完全移除菁英名單邏輯，啟動即自動掃描全台股 1800+ 支股票。
@@ -197,7 +197,7 @@ def run_v9_8_ultimate():
     
     TARGET_SAVE_DAYS = 60 # 深度修補天數
     
-    print(f"🚀 ProQuant V9.8 啟動 | 目標: 全台股 {len(tickers)} 支股票")
+    print(f"🚀 FutureWise V9.8 啟動 | 目標: 全台股 {len(tickers)} 支股票")
     print(f"⚠️ 預計耗時: 約 3 小時 | 每支股票延遲 6.1 秒防封鎖")
     
     # ★ 預載籌碼

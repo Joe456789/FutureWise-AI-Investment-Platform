@@ -1,4 +1,6 @@
-# ProQuant｜AI 驅動台股量化分析系統
+# FutureWise AI Investment Platform｜未來智策AI投資平台
+
+**AI 驅動台股量化分析系統**
 
 > 畢業專題 | 世新大學資管系 | 2025–2026
 
@@ -8,10 +10,10 @@
 
 以「從數據到可驗證策略」為核心，整合台股歷史數據爬取、XGBoost 趨勢預測模型與 FastAPI 雲端部署，實現端到端的台股量化分析系統。
 
-**本人負責範圍（後端核心開發者）**
+**我的負責範圍（與組員合作，負責全端開發與模型）**
 - 台股歷史數據自動化抓取與清洗 Pipeline
 - XGBoost 趨勢預測模型訓練與超參數調優
-- FastAPI RESTful API 設計與 Render 雲端部署
+- FastAPI RESTful API 設計與 Oracle Cloud 雲端部署
 
 ---
 
@@ -67,7 +69,7 @@ XGBoost 模型訓練 → model_universal.json
     ↓
 FastAPI 後端（stock_api_server.py）
     ↓
-Render 雲端部署
+Oracle Cloud 雲端部署
 ```
 
 ---

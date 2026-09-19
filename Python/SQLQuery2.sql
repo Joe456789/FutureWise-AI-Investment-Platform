@@ -1,5 +1,5 @@
 ﻿/*
-  ProQuant AI 交易系統 - 終極資料庫初始化腳本
+  FutureWise AI 交易系統 - 終極資料庫初始化腳本
   目的：確保 SQL 欄位與 Python 爬蟲 (V5版) 100% 契合，解決 Market_Close 遺漏問題
   修正：將檔案標籤修正為 SQL，避免系統誤以 LaTeX 編譯
 */

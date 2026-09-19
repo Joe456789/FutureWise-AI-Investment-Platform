@@ -1,4 +1,4 @@
-# 程式名稱：ProQuant 每日快充引擎 (V8.3 全市場 60 天安全掛機版)
+# 程式名稱：FutureWise 每日快充引擎 (V8.3 全市場 60 天安全掛機版)
 # 核心升級：
 # 1. 全市場掃描：解鎖全台股 1800 支股票自動抓取。
 # 2. 60 天深度修復：籌碼與股價一律回溯 60 天，徹底填補過去兩個月的空洞。
@@ -174,7 +174,7 @@ def run_v8_3_engine():
     # ★ 改為全市場掃描
     tickers = sorted(name_map.keys())
     
-    print(f"🚀 ProQuant V8.3 啟動 | 目標: {len(tickers)} 支股票 (全市場)")
+    print(f"🚀 FutureWise V8.3 啟動 | 目標: {len(tickers)} 支股票 (全市場)")
     print("⚠️ 提醒：為了符合 FinMind 每小時 600 次的 API 限制，")
     print("   每支股票抓取後將強制休息 6.1 秒。全部完成約需 3 小時，請掛機執行。")
     

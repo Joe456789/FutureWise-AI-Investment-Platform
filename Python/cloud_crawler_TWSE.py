@@ -1,4 +1,4 @@
-# 程式名稱：ProQuant 全自動快充引擎 (V10.0 雲端終極版)
+# 程式名稱：FutureWise 全自動快充引擎 (V10.0 雲端終極版)
 # 核心修正：
 # 1. 雲端對接：全面改用 MySQL 連線，對接 config.py 總開關。
 # 2. yfinance 維度防呆：加入 MultiIndex 降維處理，防止 1-dimensional 報錯。
@@ -223,7 +223,7 @@ def run_v10_cloud():
     tickers = sorted(name_map.keys())
     TARGET_SAVE_DAYS = 60 
     
-    print(f"🚀 ProQuant 雲端版啟動 | 目標: 全台股 {len(tickers)} 支股票")
+    print(f"🚀 FutureWise 雲端版啟動 | 目標: 全台股 {len(tickers)} 支股票")
     
     last_n_dates = macro_df.index[-TARGET_SAVE_DAYS:].tolist()
     global_chips_df = fetch_all_market_chips(last_n_dates)
