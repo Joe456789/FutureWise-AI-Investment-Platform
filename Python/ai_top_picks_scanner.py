@@ -148,6 +148,104 @@ def log_predictions(engine, results: list):
     print(f"💾 已記錄 {len(results)} 筆預測到 PredictionLog，供之後計算命中率")
 
 
+def fill_pending_pick_entries(engine, df_all: pd.DataFrame):
+    """把之前AI精選挑出、還沒有隔天開盤價的模擬交易，用現在資料庫已經有的最新資料補上進場價"""
+    with engine.connect() as conn:
+        pending = conn.execute(text(
+            "SELECT id, ticker, pick_date FROM AiPickTrades WHERE entry_price IS NULL"
+        )).fetchall()
+
+    if not pending:
+        return
+
+    filled_count = 0
+    for pid, ticker, pick_date in pending:
+        ticker_rows = df_all[(df_all["ticker"] == ticker) & (pd.to_datetime(df_all["trade_date"]).dt.date > pick_date)]
+        if ticker_rows.empty:
+            continue
+        next_row = ticker_rows.sort_values("trade_date").iloc[0]
+        entry_price = next_row.get("open_price")
+        if pd.isna(entry_price):
+            continue
+        entry_date = pd.to_datetime(next_row["trade_date"]).date()
+
+        with engine.connect() as conn:
+            conn.execute(text(
+                "UPDATE AiPickTrades SET entry_price = :p, entry_date = :d WHERE id = :id"
+            ), {"p": float(entry_price), "d": entry_date, "id": pid})
+            conn.commit()
+        filled_count += 1
+
+    if filled_count:
+        print(f"📌 補上 {filled_count} 筆AI精選模擬交易的隔天開盤進場價")
+
+
+def record_pick_trades(engine, momentum_list, emerging_list, bearish_list, pick_date):
+    """把今天AI精選挑出的股票，記錄成待補進場價的模擬交易（進場價要等明天開盤才知道）。
+    bearish(AI看跌名單)模擬「隔天開盤放空」，成效算法跟看漲的兩類相反（見compute_trade_return）"""
+    rows = [(r, "momentum") for r in momentum_list] + [(r, "potential") for r in emerging_list] \
+        + [(r, "bearish") for r in bearish_list]
+    if not rows:
+        return
+
+    with engine.begin() as conn:
+        for r, signal_type in rows:
+            conn.execute(text("""
+                INSERT IGNORE INTO AiPickTrades (ticker, stock_name, signal_type, pick_date, confidence)
+                VALUES (:ticker, :name, :signal_type, :pick_date, :confidence)
+            """), {
+                "ticker": r["ticker"], "name": r["name"], "signal_type": signal_type,
+                "pick_date": pick_date, "confidence": r["confidence"],
+            })
+    print(f"📝 記錄 {len(rows)} 筆今日AI精選為模擬交易，待隔天開盤補上進場價")
+
+
+def compute_trade_return(signal_type: str, entry_price: float, latest_close: float) -> float:
+    """算單筆模擬交易目前的浮動報酬率(%)。bearish類是「模擬放空」，股價跌越多報酬越高，
+    所以方向跟momentum/potential(模擬做多)相反"""
+    raw = (latest_close - entry_price) / entry_price * 100
+    return -raw if signal_type == "bearish" else raw
+
+
+def snapshot_performance(engine, snapshot_date):
+    """把AiPickTrades目前累積(所有已進場)的浮動績效，依日期存一筆快照到AiPickPerformanceHistory，
+    用來畫「近30天報酬率變化」趨勢圖——只看累積總平均，看不出績效是在變好還變差"""
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT signal_type, entry_price,
+                   (SELECT close_price FROM StockPrice sp WHERE sp.ticker = t.ticker ORDER BY sp.trade_date DESC LIMIT 1) AS latest_close
+            FROM AiPickTrades t WHERE entry_price IS NOT NULL
+        """)).fetchall()
+
+    stats = {}
+    for signal_type, entry_price, latest_close in rows:
+        if entry_price is None or latest_close is None or float(entry_price) == 0:
+            continue
+        ret = compute_trade_return(signal_type, float(entry_price), float(latest_close))
+        s = stats.setdefault(signal_type, {"returns": [], "wins": 0})
+        s["returns"].append(ret)
+        if ret > 0:
+            s["wins"] += 1
+
+    if not stats:
+        return
+
+    with engine.begin() as conn:
+        for signal_type, s in stats.items():
+            count = len(s["returns"])
+            conn.execute(text("""
+                INSERT INTO AiPickPerformanceHistory (snapshot_date, signal_type, avg_return, win_rate, trade_count)
+                VALUES (:d, :st, :ar, :wr, :c)
+                ON DUPLICATE KEY UPDATE avg_return = VALUES(avg_return), win_rate = VALUES(win_rate), trade_count = VALUES(trade_count)
+            """), {
+                "d": snapshot_date, "st": signal_type,
+                "ar": round(sum(s["returns"]) / count, 2),
+                "wr": round(s["wins"] / count * 100, 2),
+                "c": count,
+            })
+    print(f"📈 已記錄 {snapshot_date} 的AI精選績效快照")
+
+
 def run_scan(top_n: int = TOP_N):
     print("📡 正在連線至 MySQL 雲端資料庫...")
     engine = create_engine(MYSQL_CONN_STR)
@@ -167,6 +265,8 @@ def run_scan(top_n: int = TOP_N):
 
     # 先驗證之前記錄的預測，準不準都要老實記錄下來，不能只挑對的秀
     resolve_pending_predictions(engine, df_all)
+    # 順便把之前AI精選挑出、還在等隔天開盤價的模擬交易補上進場價
+    fill_pending_pick_entries(engine, df_all)
 
     results = []
     total = 0
@@ -220,13 +320,27 @@ def run_scan(top_n: int = TOP_N):
         r.pop("predicted_at", None)
 
     results.sort(key=lambda x: x["confidence"], reverse=True)
-    top_bullish = results[:top_n]
+
+    # AI精選拆成兩類：今天漲幅已經很大的股票，模型看漲的信心分數常常只是反映
+    # 「量能比/K值/D值/漲跌幅_1日」這些技術指標同時衝到極端值，比較像是「動能延續」，
+    # 追價風險較高；分開列出，讓使用者自己判斷要哪一種，而不是全部混在一起當成同一種推薦
+    MOMENTUM_THRESHOLD = 5.0  # 今日漲幅超過 5% 歸類為動能延續
+    bullish_candidates = [r for r in results if r["confidence"] >= 50]
+    top_bullish_momentum = [r for r in bullish_candidates if r["percent"] is not None and r["percent"] >= MOMENTUM_THRESHOLD][:top_n]
+    top_bullish_emerging = [r for r in bullish_candidates if r["percent"] is None or r["percent"] < MOMENTUM_THRESHOLD][:top_n]
     top_bearish = sorted(results, key=lambda x: x["confidence"])[:top_n]
+
+    # 把今天精選出來的股票記錄成模擬交易，長期追蹤「精選隔天開盤買進/放空」實際績效如何
+    pick_date = pd.to_datetime(df_all["trade_date"]).max().date()
+    record_pick_trades(engine, top_bullish_momentum, top_bullish_emerging, top_bearish, pick_date)
+    # 順便存一筆今天的績效快照，之後才有辦法在前端畫「近30天報酬率變化」趨勢圖
+    snapshot_performance(engine, pick_date)
 
     cache = {
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "scanned_count": total,
-        "top_bullish": top_bullish,
+        "top_bullish_momentum": top_bullish_momentum,
+        "top_bullish_emerging": top_bullish_emerging,
         "top_bearish": top_bearish
     }
 

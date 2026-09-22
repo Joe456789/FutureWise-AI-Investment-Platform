@@ -7,6 +7,21 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
+        /* 設計語彙（跟dashboard.html同一套shadcn/ui風格token，統一全站視覺質感） */
+        :root {
+            --sc-radius: 0.75rem;
+            --sc-card-bg: #17181c;
+            --sc-card-border: rgba(255,255,255,0.08);
+            --sc-muted-fg: #94a3b8;
+            --sc-up: #ef4444;   /* 台股慣例：紅漲 */
+            --sc-down: #22c55e; /* 台股慣例：綠跌 */
+        }
+        .sc-card { background: var(--sc-card-bg); border: 1px solid var(--sc-card-border); border-radius: var(--sc-radius); padding: 14px 16px; }
+        .sc-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.4; white-space: nowrap; }
+        .sc-badge-up { background: rgba(239, 68, 68, 0.12); color: var(--sc-up); }
+        .sc-badge-down { background: rgba(34, 197, 94, 0.12); color: var(--sc-down); }
+        .sc-badge-neutral { background: rgba(148, 163, 184, 0.12); color: var(--sc-muted-fg); }
+
         /* 基礎設定與深色背景 */
         body {
             margin: 0;
@@ -290,7 +305,7 @@
                         <div class="skeleton-block" style="height: 60%;"></div>
                     </div>
                 </div>
-                <div id="chartSummary" style="margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: rgba(255,255,255,0.04); font-size: 13px; color: #cbd5e1; line-height: 1.6;">
+                <div id="chartSummary" class="sc-card" style="margin-top: 12px; padding: 10px 12px; font-size: 13px; color: #cbd5e1; line-height: 1.6;">
                     <div class="skeleton-block skeleton-summary-line" style="width: 90%;"></div>
                     <div class="skeleton-block skeleton-summary-line" style="width: 60%;"></div>
                 </div>
@@ -368,6 +383,9 @@
                 }
             }
             const response = await originalFetch(resource, config);
+            if (response.status === 403 && typeof resource === 'string' && resource.includes(API_BASE_URL)) {
+                response.clone().json().then(b => { if (b && b.detail && b.detail.code === 'CONSENT_REQUIRED') window.location.href = 'consent.html?required=1'; }).catch(() => {});
+            }
             if(response.status === 401 && !resource.includes('/api/auth/login') && !resource.includes('/api/auth/register')) {
                 alert('登入已過期或權限不足，請重新登入');
                 window.location.href = 'login.html';
@@ -691,6 +709,12 @@
             if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 分析中，約需10-20秒...'; }
             try {
                 const res = await fetch(`${API_BASE_URL}/api/sentiment/run_crawler/${ticker}`, { method: 'POST' });
+                if (res.status === 429) {
+                    const data = await res.json().catch(() => ({}));
+                    alert(data.detail || '操作過於頻繁，請稍後再試');
+                    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-rotate"></i> 更新本股最新輿情'; }
+                    return;
+                }
                 if (!res.ok) throw new Error('更新失敗');
                 await loadSentiment(ticker);
             } catch (err) {
@@ -762,12 +786,13 @@
             const diff = targetPrice - lastRealPrice;
             const percent = (diff / lastRealPrice) * 100;
             const dirText = isBullish ? '看漲 📈' : '看跌 📉';
-            const dirColor = isBullish ? '#ef4444' : '#22c55e';
+            const dirBadgeClass = isBullish ? 'sc-badge-up' : 'sc-badge-down';
             const sign = diff >= 0 ? '+' : '';
 
             let extraText = '';
             if (confidence !== null && confidence !== undefined) {
-                extraText = `，AI 信心指數 <b>${Math.round(confidence)}%</b>`;
+                const confClass = confidence >= 50 ? 'sc-badge-up' : 'sc-badge-down';
+                extraText = `，<span class="sc-badge ${confClass}">AI 信心指數 ${Math.round(confidence)}%</span>`;
             } else if (rangeLow !== undefined && rangeHigh !== undefined) {
                 extraText = `，預測區間約 <b>$${rangeLow.toFixed(2)} ~ $${rangeHigh.toFixed(2)}</b>`;
             }
@@ -781,10 +806,10 @@
                     suggestionHtml = `
                         <div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.08);">
                             <div style="color:#94a3b8; font-size:11px; margin-bottom:6px;">📍 操作參考（依 ATR 波動幅度計算，非投資建議）</div>
-                            <div style="display:flex; justify-content:space-between; font-size:12px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; flex-wrap:wrap; gap:6px;">
                                 <span>進場參考：<b style="color:#e2e8f0;">$${lastRealPrice.toFixed(2)}</b></span>
-                                <span>停損：<b style="color:#22c55e;">$${stopLoss.toFixed(2)}</b> (${stopLossPct.toFixed(1)}%)</span>
-                                <span>停利：<b style="color:#ef4444;">$${takeProfit.toFixed(2)}</b></span>
+                                <span class="sc-badge sc-badge-down">停損 $${stopLoss.toFixed(2)} (${stopLossPct.toFixed(1)}%)</span>
+                                <span class="sc-badge sc-badge-up">停利 $${takeProfit.toFixed(2)}</span>
                             </div>
                         </div>`;
                 } else {
@@ -796,7 +821,7 @@
             }
 
             summaryEl.innerHTML =
-                `<span style="color:${dirColor}; font-weight:bold;">${dirText}</span>　` +
+                `<span class="sc-badge ${dirBadgeClass}">${dirText}</span>　` +
                 `AI 預測 <b>${targetLabel}</b> 收盤價約 <b>$${targetPrice.toFixed(2)}</b>` +
                 `（較目前 ${sign}${diff.toFixed(2)}，${sign}${percent.toFixed(2)}%）${extraText}。` +
                 `<br><span style="color:#94a3b8; font-size:12px;">圖中紅/綠陰影範圍代表 AI 預測的合理波動區間，僅供參考，不代表保證會發生。</span>` +

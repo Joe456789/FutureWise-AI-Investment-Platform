@@ -6,6 +6,21 @@
     <title>通知管理 - FutureWise AI</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
+        /* 設計語彙（跟dashboard.html同一套shadcn/ui風格token，統一全站視覺質感） */
+        :root {
+            --sc-radius: 0.75rem;
+            --sc-card-bg: #17181c;
+            --sc-card-border: rgba(255,255,255,0.08);
+            --sc-muted-fg: #94a3b8;
+            --sc-up: #ef4444;   /* 台股慣例：紅漲 */
+            --sc-down: #22c55e; /* 台股慣例：綠跌 */
+        }
+        .sc-card { background: var(--sc-card-bg); border: 1px solid var(--sc-card-border); border-radius: var(--sc-radius); }
+        .sc-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.4; white-space: nowrap; }
+        .sc-badge-up { background: rgba(239, 68, 68, 0.12); color: var(--sc-up); }
+        .sc-badge-down { background: rgba(34, 197, 94, 0.12); color: var(--sc-down); }
+        .sc-badge-neutral { background: rgba(148, 163, 184, 0.12); color: var(--sc-muted-fg); }
+
         * { box-sizing: border-box; }
         body { margin: 0; padding: 0; background-color: #000000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; color: #ffffff; }
         .app-container { width: 100%; max-width: 414px; height: 100vh; max-height: 896px; background-color: #121212; position: relative; display: flex; flex-direction: column; box-shadow: 0 0 20px rgba(255, 255, 255, 0.05); overflow: hidden; }
@@ -30,10 +45,49 @@
         input:checked + .slider { background-color: #38bdf8; }
         input:checked + .slider:before { transform: translateX(20px); }
 
+        @keyframes skeleton-pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+        .skeleton-block { background-color: #2a2a2a; border-radius: 6px; animation: skeleton-pulse 1.4s ease-in-out infinite; }
+        .switch-skeleton { width: 46px; height: 26px; border-radius: 26px; flex-shrink: 0; }
+
         .toast { position: fixed; bottom: 30px; left: 50%; background: #1e1e1e; border: 1px solid #38bdf8; color: #e2e8f0; padding: 10px 20px; border-radius: 20px; font-size: 13px; opacity: 0; pointer-events: none; z-index: 50; transform: translateX(-50%) translateY(16px) scale(0.9); transition: opacity 0.25s ease, transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
         .toast.show { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
             .rip-btn { position: relative; overflow: hidden; }
         .rip-ink { position: absolute; border-radius: 50%; background: rgba(255,255,255,0.35); pointer-events: none; transform: scale(0); opacity: 0.6; transition: transform 0.55s ease, opacity 0.55s ease; }
+
+        .section-title { font-size: 15px; font-weight: bold; color: #94a3b8; margin: 0 0 12px; display: flex; align-items: center; justify-content: space-between; }
+        .mark-all-btn { font-size: 12px; color: #38bdf8; background: none; border: none; cursor: pointer; padding: 4px 8px; }
+        .alert-card { background: var(--sc-card-bg); border: 1px solid var(--sc-card-border); border-radius: var(--sc-radius); padding: 14px; margin-bottom: 10px; cursor: pointer; }
+        .alert-card.unread { border-color: rgba(56, 189, 248, 0.4); background-color: rgba(56, 189, 248, 0.05); }
+        .alert-top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+        .alert-name { font-size: 14px; font-weight: bold; color: #e2e8f0; }
+        .alert-code { font-size: 12px; color: #64748b; }
+        .alert-detail { font-size: 13px; color: #cbd5e1; margin: 4px 0; }
+        .alert-time { font-size: 11px; color: #64748b; }
+
+        /* 訊號卡片（結構化通知）：標題列 / 核心策略 / 標的 / 現價 / 觸發原因 / 關鍵數字 / 時間 */
+        .sig-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+        .sig-title { font-size: 14px; font-weight: bold; color: #e2e8f0; }
+        .sig-grade { font-size: 11px; font-weight: 800; padding: 2px 9px; border-radius: 999px; letter-spacing: 0.5px; }
+        .sig-grade.AA { background: rgba(245, 158, 11, 0.18); color: #fbbf24; }
+        .sig-grade.A { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
+        .sig-grade.B { background: rgba(148, 163, 184, 0.15); color: #94a3b8; }
+        .sig-time { margin-left: auto; font-size: 11px; color: #64748b; }
+        .sig-row { font-size: 13px; color: #cbd5e1; line-height: 1.7; }
+        .sig-row b { color: #94a3b8; font-weight: 600; }
+        .sig-row a { color: #38bdf8; text-decoration: none; font-weight: bold; }
+        .sig-strategy { font-size: 15px; font-weight: bold; color: #f1f5f9; }
+        .sig-sep { height: 1px; background: rgba(255,255,255,0.08); margin: 10px 0; }
+        .sig-chg.up { color: #ef4444; }
+        .sig-chg.down { color: #22c55e; }
+        .sig-muted { color: #64748b; font-size: 11px; }
+        .sig-reasons { margin: 2px 0 0; padding-left: 20px; font-size: 12.5px; color: #cbd5e1; line-height: 1.7; }
+        .sig-metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; margin-top: 10px; }
+        .sig-metric { background: rgba(255,255,255,0.04); border-radius: 8px; padding: 6px 10px; }
+        .sig-metric .k { display: block; font-size: 10.5px; color: #64748b; }
+        .sig-metric .v { font-size: 13px; color: #e2e8f0; font-weight: 600; }
+        .sig-foot { font-size: 11.5px; color: #94a3b8; }
+        .empty-state { text-align: center; color: #94a3b8; margin: 30px 0; font-size: 13px; }
+        .empty-state i { font-size: 28px; margin-bottom: 10px; color: #333; display: block; }
     </style>
 </head>
 <body>
@@ -47,15 +101,33 @@
         <div class="content">
             <div class="notice-banner">
                 <i class="fas fa-circle-info"></i>
-                <span>目前這裡僅為 App 內的通知偏好設定，尚未串接手機推播通知，您的選擇會影響社群等頁面未來是否顯示相關提示。</span>
+                <span>訊號通知僅在App內顯示，尚未串接手機推播，需要打開網頁/App才看得到。</span>
             </div>
 
+            <div class="notice-banner" style="background: rgba(148,163,184,0.08); border-color: rgba(148,163,184,0.25); color: #94a3b8;">
+                <i class="fas fa-circle-question"></i>
+                <span>訊號依每個交易日<b>收盤後</b>的資料產生，不是盤中即時。等級 AA／A／B 由「同方向訊號數量、AI 信心度強弱與量能」自動計算，僅供排序參考，不構成投資建議。</span>
+            </div>
+
+            <div class="section-title">
+                <span><i class="fas fa-bell"></i> 自選股買賣訊號</span>
+                <button class="mark-all-btn rip-btn" onclick="markAllRead()">全部標為已讀</button>
+            </div>
+            <div id="alertPerfSummary" style="display:none; margin-bottom:14px;"></div>
+
+            <div id="alertList">
+                <div class="alert-card"><div class="skeleton-block" style="height:14px; width:60%;"></div></div>
+                <div class="alert-card"><div class="skeleton-block" style="height:14px; width:50%;"></div></div>
+            </div>
+
+            <div class="section-title" style="margin-top:24px;">通知偏好設定</div>
             <div class="toggle-row">
                 <div class="toggle-info">
                     <div class="toggle-title">AI 預測提醒</div>
                     <div class="toggle-desc">收藏股票有新的預測結果時通知我</div>
                 </div>
-                <label class="switch">
+                <div class="skeleton-block switch-skeleton" id="skeleton-ai"></div>
+                <label class="switch" style="display:none;">
                     <input type="checkbox" id="toggle-ai" onchange="saveSettings()">
                     <span class="slider"></span>
                 </label>
@@ -66,7 +138,8 @@
                     <div class="toggle-title">社群回覆通知</div>
                     <div class="toggle-desc">有人回覆或按讚我的貼文時通知我</div>
                 </div>
-                <label class="switch">
+                <div class="skeleton-block switch-skeleton" id="skeleton-community"></div>
+                <label class="switch" style="display:none;">
                     <input type="checkbox" id="toggle-community" onchange="saveSettings()">
                     <span class="slider"></span>
                 </label>
@@ -77,7 +150,8 @@
                     <div class="toggle-title">系統公告</div>
                     <div class="toggle-desc">重大更新或維護公告</div>
                 </div>
-                <label class="switch">
+                <div class="skeleton-block switch-skeleton" id="skeleton-system"></div>
+                <label class="switch" style="display:none;">
                     <input type="checkbox" id="toggle-system" onchange="saveSettings()">
                     <span class="slider"></span>
                 </label>
@@ -103,7 +177,11 @@
                     config.headers['Authorization'] = 'Bearer ' + token;
                 }
             }
-            return originalFetch(resource, config);
+            const __resp = await originalFetch(resource, config);
+            if (__resp.status === 403 && typeof resource === 'string' && resource.includes(API_BASE_URL)) {
+                __resp.clone().json().then(b => { if (b && b.detail && b.detail.code === 'CONSENT_REQUIRED') window.location.href = 'consent.html?required=1'; }).catch(() => {});
+            }
+            return __resp;
         };
         // -----------------------------
         const token = localStorage.getItem('access_token');
@@ -119,6 +197,11 @@
             setTimeout(() => t.classList.remove('show'), 2000);
         }
 
+        function revealSwitches() {
+            document.querySelectorAll('.switch-skeleton').forEach(el => el.style.display = 'none');
+            document.querySelectorAll('.switch').forEach(el => el.style.display = 'inline-block');
+        }
+
         async function loadSettings() {
             try {
                 const res = await fetch(`${API_BASE_URL}/api/notifications/settings`, {
@@ -129,13 +212,20 @@
                     window.location.href = 'login.html';
                     return;
                 }
+                if (!res.ok) {
+                    showToast('讀取設定失敗，請重新整理');
+                    revealSwitches();
+                    return;
+                }
                 const data = await res.json();
                 document.getElementById('toggle-ai').checked = !!data.ai_alert;
                 document.getElementById('toggle-community').checked = !!data.community_reply;
                 document.getElementById('toggle-system').checked = !!data.system_announce;
+                revealSwitches();
             } catch (err) {
                 console.error(err);
                 showToast('載入失敗，請檢查網路連線');
+                revealSwitches();
             }
         }
 
@@ -159,6 +249,123 @@
         }
 
         loadSettings();
+
+        function timeAgo(isoStr) {
+            if (!isoStr) return '';
+            const diffMs = Date.now() - new Date(isoStr).getTime();
+            const mins = Math.floor(diffMs / 60000);
+            if (mins < 1) return '剛剛';
+            if (mins < 60) return `${mins}分鐘前`;
+            const hours = Math.floor(mins / 60);
+            if (hours < 24) return `${hours}小時前`;
+            return `${Math.floor(hours / 24)}天前`;
+        }
+
+        // 所有來自伺服器的文字一律先跳脫再放進HTML
+        function esc(v) {
+            const d = document.createElement('div');
+            d.textContent = v == null ? '' : String(v);
+            return d.innerHTML;
+        }
+
+        function clockTime(isoStr) {
+            if (!isoStr) return '';
+            return new Date(isoStr).toLocaleTimeString('zh-TW', { hour12: false });
+        }
+
+        // 新版訊號卡片（有 payload）
+        function renderSignalCard(a) {
+            const p = a.payload;
+            const isBuy = p.direction === 'buy';
+            const dirBadge = `<span class="sc-badge ${isBuy ? 'sc-badge-up' : 'sc-badge-down'}">${isBuy ? '買進訊號' : '賣出／警示'}</span>`;
+            const grade = ['AA', 'A', 'B'].includes(p.grade) ? p.grade : 'B';
+            const fire = grade === 'AA' ? ' 🔥' : '';
+            const chg = (p.change_pct === null || p.change_pct === undefined) ? '' :
+                `<span class="sig-chg ${p.change_pct >= 0 ? 'up' : 'down'}">${p.change_pct >= 0 ? '+' : ''}${esc(p.change_pct)}%</span>`;
+            const price = (p.price === null || p.price === undefined) ? '--' : Number(p.price).toFixed(2);
+            const reasons = (p.reasons || []).map(r => `<li>${esc(r)}</li>`).join('');
+            const metrics = (p.metrics || []).map(m =>
+                `<div class="sig-metric"><span class="k">${esc(m.label)}</span><span class="v">${esc(m.value)}</span></div>`).join('');
+
+            return `
+            <div class="alert-card ${a.is_read ? '' : 'unread'}" onclick="markRead(${Number(a.id)}, this)">
+                <div class="sig-head">
+                    <span class="sig-title">🚨 訊號觸發</span>
+                    ${dirBadge}
+                    <span class="sig-grade ${grade}">${grade}</span>
+                    <span class="sig-time">${esc(timeAgo(a.created_at))}</span>
+                </div>
+                <div class="sig-row">🎯 <b>核心策略：</b><span class="sig-strategy">${esc(p.strategy || a.signal_detail)}${fire}</span></div>
+                <div class="sig-sep"></div>
+                <div class="sig-row">📈 <b>標的：</b><a href="ai_analysis.html?ticker=${encodeURIComponent(a.ticker)}" onclick="event.stopPropagation()">${esc(a.ticker)} ${esc(a.stock_name || '')}</a></div>
+                <div class="sig-row">💰 <b>現價：</b>${price} ${chg} <span class="sig-muted">（${esc(p.data_date || a.trade_date)} 收盤）</span></div>
+                ${reasons ? `<div class="sig-row">🔎 <b>觸發原因：</b></div><ul class="sig-reasons">${reasons}</ul>` : ''}
+                ${metrics ? `<div class="sig-metrics">${metrics}</div>` : ''}
+                <div class="sig-sep"></div>
+                <div class="sig-foot">⏰ ${esc(clockTime(a.created_at))}</div>
+            </div>`;
+        }
+
+        // 舊通知（沒有 payload，只有一行文字）
+        function renderLegacyCard(a) {
+            const isBuy = a.signal_type.endsWith('bullish') || a.signal_type === 'pattern_buy';
+            return `
+            <div class="alert-card ${a.is_read ? '' : 'unread'}" onclick="markRead(${Number(a.id)}, this)">
+                <div class="alert-top">
+                    <span class="sc-badge ${isBuy ? 'sc-badge-up' : 'sc-badge-down'}">${isBuy ? '買進' : '賣出'}</span>
+                    <span class="alert-name">${esc(a.stock_name || a.ticker)}</span>
+                    <span class="alert-code">${esc(a.ticker)}</span>
+                </div>
+                <div class="alert-detail">${esc(a.signal_detail)}</div>
+                <div class="alert-time">${esc(timeAgo(a.created_at))}</div>
+            </div>`;
+        }
+
+        function renderAlerts(alerts) {
+            const container = document.getElementById('alertList');
+            if (alerts.length === 0) {
+                container.innerHTML = `<div class="empty-state"><i class="fas fa-bell-slash"></i>目前沒有自選股買賣訊號</div>`;
+                return;
+            }
+            container.innerHTML = alerts.map(a => a.payload ? renderSignalCard(a) : renderLegacyCard(a)).join('');
+        }
+
+        async function loadAlerts() {
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/watchlist_alerts`, {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (!res.ok) throw new Error('載入失敗');
+                const data = await res.json();
+                renderAlerts(data.alerts || []);
+            } catch (err) {
+                console.error(err);
+                document.getElementById('alertList').innerHTML = `<div class="empty-state"><i class="fas fa-triangle-exclamation"></i>載入失敗，請重新整理再試一次</div>`;
+            }
+        }
+
+        async function markRead(id, cardEl) {
+            cardEl.classList.remove('unread');
+            try {
+                await fetch(`${API_BASE_URL}/api/watchlist_alerts/${id}/read`, { method: 'PUT' });
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function markAllRead() {
+            try {
+                await fetch(`${API_BASE_URL}/api/watchlist_alerts/read_all`, { method: 'PUT' });
+                document.querySelectorAll('.alert-card.unread').forEach(el => el.classList.remove('unread'));
+                showToast('已全部標為已讀');
+            } catch (err) {
+                console.error(err);
+                showToast('操作失敗，請稍後再試');
+            }
+        }
+
+        loadAlerts();
+        loadAlertPerformance();
     </script>
     <script>
         document.addEventListener('click', function(e) {

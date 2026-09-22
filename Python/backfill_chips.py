@@ -145,15 +145,16 @@ def fetch_day_chips(dt):
     try:
         url = f"https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php?l=zh-tw&o=json&se=EW&t=D&d={dt_tpex}"
         res = session.get(url, timeout=15, verify=False).json()
-        if 'aaData' in res and res['aaData']:
-            for row in res['aaData']:
+        tpex_rows = res.get('tables', [{}])[0].get('data', [])
+        if tpex_rows:
+            for row in tpex_rows:
                 all_chips.append({
-                    'ticker':  str(row[0]).strip(), 
-                    'foreign': float(str(row[10]).replace(',', '')) / 1000, 
-                    'trust':   float(str(row[13]).replace(',', '')) / 1000, 
+                    'ticker':  str(row[0]).strip(),
+                    'foreign': float(str(row[10]).replace(',', '')) / 1000,
+                    'trust':   float(str(row[13]).replace(',', '')) / 1000,
                     'dealer':  (float(str(row[16]).replace(',', '')) + float(str(row[19]).replace(',', ''))) / 1000
                 })
-            print(f"  [TPEX] {dt_key} 取得 {len(res['aaData'])} 筆")
+            print(f"  [TPEX] {dt_key} 取得 {len(tpex_rows)} 筆")
         else:
             print(f"  [TPEX] {dt_key} 無資料")
     except Exception as e:

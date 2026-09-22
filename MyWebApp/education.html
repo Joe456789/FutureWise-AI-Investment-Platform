@@ -6,6 +6,16 @@
     <title>FutureWise AI - 投資教學中心</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
+        /* 設計語彙（跟dashboard.html同一套shadcn/ui風格token，統一全站視覺質感） */
+        :root {
+            --sc-radius: 0.75rem;
+            --sc-card-bg: #17181c;
+            --sc-card-border: rgba(255,255,255,0.08);
+            --sc-muted-fg: #94a3b8;
+            --sc-up: #ef4444;   /* 台股慣例：紅漲 */
+            --sc-down: #22c55e; /* 台股慣例：綠跌 */
+        }
+
         /* 基礎設定與深色背景 */
         body { margin: 0; padding: 0; background-color: #000000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; color: #ffffff; }
         .app-container { width: 100%; max-width: 414px; height: 100vh; background-color: #121212; position: relative; display: flex; flex-direction: column; box-shadow: 0 0 20px rgba(255, 255, 255, 0.05); overflow: hidden; }
@@ -32,6 +42,10 @@
         .continue-btn { background-color: #4f46e5; color: white; border: none; padding: 10px 15px; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; transition: 0.2s; }
         .continue-btn:active { transform: scale(0.98); }
 
+        /* 骨架屏載入動畫，取代空白等待 */
+        @keyframes skeleton-pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+        .skeleton-block { background-color: #2a2a2a; border-radius: 6px; animation: skeleton-pulse 1.4s ease-in-out infinite; }
+
         /* 文章分類標籤 */
         .category-scroll { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 5px; margin-bottom: 15px; }
         .category-scroll::-webkit-scrollbar { display: none; }
@@ -39,7 +53,7 @@
         .category-tag.active { border-color: #38bdf8; color: #38bdf8; background-color: rgba(56, 189, 248, 0.1); }
 
         /* 最新精選文章清單 */
-        .article-card { background-color: #1a1a1a; border-radius: 12px; padding: 15px; margin-bottom: 12px; border: 1px solid #2a2a2a; display: flex; gap: 12px; cursor: pointer; transition: 0.2s; }
+        .article-card { background: var(--sc-card-bg); border-radius: var(--sc-radius); padding: 15px; margin-bottom: 12px; border: 1px solid var(--sc-card-border); display: flex; gap: 12px; cursor: pointer; transition: 0.2s; }
         .article-card:active { transform: scale(0.98); background-color: #222; }
         
         .article-icon-box { width: 50px; height: 50px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
@@ -121,13 +135,23 @@
             </div>
             <div class="section-title"><i class="fas fa-route"></i> 我的閱讀進度</div>
             <div class="ai-path-card">
-                <div class="ai-path-header">
-                    <div class="ai-path-subtitle" id="readingSubtitle"><i class="fas fa-robot"></i> 載入中...</div>
-                    <div class="ai-path-progress" id="readingProgressText"></div>
+                <div id="readingSkeleton">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <div class="skeleton-block" style="height:13px; width:45%;"></div>
+                        <div class="skeleton-block" style="height:12px; width:20%;"></div>
+                    </div>
+                    <div class="skeleton-block" style="height:18px; width:70%; margin-bottom:15px;"></div>
+                    <div class="skeleton-block" style="height:6px; width:100%;"></div>
                 </div>
-                <div class="ai-path-title" id="readingNextTitle"></div>
-                <div class="progress-bar-bg"><div class="progress-bar-fill" id="readingProgressBar" style="width: 0%;"></div></div>
-                <button class="continue-btn" id="readingContinueBtn" style="display:none;"><i class="fas fa-book-reader"></i> 繼續閱讀</button>
+                <div id="readingRealContent" style="display:none;">
+                    <div class="ai-path-header">
+                        <div class="ai-path-subtitle" id="readingSubtitle"><i class="fas fa-robot"></i> 載入中...</div>
+                        <div class="ai-path-progress" id="readingProgressText"></div>
+                    </div>
+                    <div class="ai-path-title" id="readingNextTitle"></div>
+                    <div class="progress-bar-bg"><div class="progress-bar-fill" id="readingProgressBar" style="width: 0%;"></div></div>
+                    <button class="continue-btn rip-btn" id="readingContinueBtn" style="display:none;"><i class="fas fa-book-reader"></i> 繼續閱讀</button>
+                </div>
             </div>
 
             <div class="section-title"><i class="fas fa-tags"></i> 文章分類</div>
@@ -156,7 +180,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <div class="modal-tag" id="modalTag">分類標籤</div>
-                <button class="close-btn" onclick="closeModal()"><i class="fas fa-times"></i></button>
+                <button class="close-btn rip-btn" onclick="closeModal()"><i class="fas fa-times"></i></button>
             </div>
             <div class="modal-body">
                 <div class="m-title" id="modalTitle">文章標題</div>
@@ -416,7 +440,11 @@
                     config.headers['Authorization'] = 'Bearer ' + token;
                 }
             }
-            return originalFetch(resource, config);
+            const __resp = await originalFetch(resource, config);
+            if (__resp.status === 403 && typeof resource === 'string' && resource.includes(API_BASE_URL)) {
+                __resp.clone().json().then(b => { if (b && b.detail && b.detail.code === 'CONSENT_REQUIRED') window.location.href = 'consent.html?required=1'; }).catch(() => {});
+            }
+            return __resp;
         };
         // -----------------------------
         const categoryOrder = ['fundamental', 'chips', 'tech', 'macro', 'psychology'];
@@ -436,6 +464,13 @@
             const nextTitleEl = document.getElementById('readingNextTitle');
             const barEl = document.getElementById('readingProgressBar');
             const btnEl = document.getElementById('readingContinueBtn');
+            const skeletonEl = document.getElementById('readingSkeleton');
+            const realContentEl = document.getElementById('readingRealContent');
+
+            function revealReadingContent() {
+                if (skeletonEl) skeletonEl.style.display = 'none';
+                if (realContentEl) realContentEl.style.display = 'block';
+            }
 
             if (!token) {
                 subtitleEl.innerHTML = '<i class="fas fa-lock"></i> 登入後可追蹤您的個人閱讀進度';
@@ -443,6 +478,7 @@
                 nextTitleEl.innerText = '目前顯示的是通用文章庫，登入即可記錄已讀進度';
                 barEl.style.width = '0%';
                 btnEl.style.display = 'none';
+                revealReadingContent();
                 return;
             }
 
@@ -473,10 +509,12 @@
                     nextTitleEl.innerText = '🎉 已讀完所有文章！';
                     btnEl.style.display = 'none';
                 }
+                revealReadingContent();
             } catch (err) {
                 console.error(err);
                 subtitleEl.innerHTML = '<i class="fas fa-triangle-exclamation"></i> 無法載入閱讀進度';
                 nextTitleEl.innerText = '請檢查網路連線後重新整理';
+                revealReadingContent();
             }
         }
 

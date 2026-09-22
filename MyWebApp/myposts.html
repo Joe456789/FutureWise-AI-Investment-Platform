@@ -6,6 +6,20 @@
     <title>我的貼文 - FutureWise AI</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
+        /* 設計語彙（跟dashboard.html同一套shadcn/ui風格token，統一全站視覺質感） */
+        :root {
+            --sc-radius: 0.75rem;
+            --sc-card-bg: #17181c;
+            --sc-card-border: rgba(255,255,255,0.08);
+            --sc-muted-fg: #94a3b8;
+            --sc-up: #ef4444;   /* 台股慣例：紅漲 */
+            --sc-down: #22c55e; /* 台股慣例：綠跌 */
+        }
+        .sc-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.4; white-space: nowrap; }
+        .sc-badge-up { background: rgba(239, 68, 68, 0.12); color: var(--sc-up); }
+        .sc-badge-down { background: rgba(34, 197, 94, 0.12); color: var(--sc-down); }
+        .sc-badge-neutral { background: rgba(148, 163, 184, 0.12); color: var(--sc-muted-fg); }
+
         * { box-sizing: border-box; }
         body { margin: 0; padding: 0; background-color: #000000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; color: #ffffff; }
         .app-container { width: 100%; max-width: 414px; height: 100vh; max-height: 896px; background-color: #121212; position: relative; display: flex; flex-direction: column; box-shadow: 0 0 20px rgba(255, 255, 255, 0.05); overflow: hidden; }
@@ -18,13 +32,13 @@
         .section-title { font-size: 15px; font-weight: bold; color: #94a3b8; margin: 0 0 12px 0; display: flex; align-items: center; gap: 8px; }
         .section-title.second { margin-top: 30px; }
 
-        .reply-card { background-color: #1e1e1e; border: 1px solid #2a2a2a; border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+        .reply-card { background: var(--sc-card-bg); border: 1px solid var(--sc-card-border); border-radius: var(--sc-radius); padding: 12px 14px; margin-bottom: 10px; }
         .reply-card .who { font-size: 13px; color: #38bdf8; font-weight: bold; }
         .reply-card .on { font-size: 11px; color: #64748b; margin-left: 6px; }
         .reply-card .body { font-size: 13px; color: #e2e8f0; margin-top: 6px; line-height: 1.5; }
         .reply-card .time { font-size: 11px; color: #64748b; margin-top: 6px; }
 
-        .post-card { background-color: #1e1e1e; border: 1px solid #2a2a2a; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+        .post-card { background: var(--sc-card-bg); border: 1px solid var(--sc-card-border); border-radius: var(--sc-radius); padding: 16px; margin-bottom: 12px; }
         .post-tag { display: inline-block; color: #38bdf8; background-color: rgba(56, 189, 248, 0.1); padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-bottom: 8px; font-weight: bold; }
         .post-content { font-size: 14px; color: #e2e8f0; line-height: 1.6; white-space: pre-wrap; }
         .post-edit-area { width: 100%; min-height: 80px; background-color: #0f172a; border: 1px solid #334155; border-radius: 8px; color: white; padding: 10px; font-size: 14px; font-family: inherit; resize: vertical; box-sizing: border-box; }
@@ -41,6 +55,13 @@
         .empty-state i { font-size: 32px; margin-bottom: 12px; color: #333; display: block; }
             .rip-btn { position: relative; overflow: hidden; }
         .rip-ink { position: absolute; border-radius: 50%; background: rgba(255,255,255,0.35); pointer-events: none; transform: scale(0); opacity: 0.6; transition: transform 0.55s ease, opacity 0.55s ease; }
+
+        @keyframes skeleton-pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+        .skeleton-block { background-color: #2a2a2a; border-radius: 6px; animation: skeleton-pulse 1.4s ease-in-out infinite; }
+        .skeleton-stock-card { background-color: #1e1e1e; border-radius: 12px; padding: 15px; margin-bottom: 12px; border: 1px solid #2a2a2a; }
+
+        .toast { position: fixed; bottom: 30px; left: 50%; background: #1e1e1e; border: 1px solid #38bdf8; color: #e2e8f0; padding: 10px 20px; border-radius: 20px; font-size: 13px; opacity: 0; pointer-events: none; z-index: 50; transform: translateX(-50%) translateY(16px) scale(0.9); transition: opacity 0.25s ease, transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
     </style>
 </head>
 <body>
@@ -53,15 +74,49 @@
 
         <div class="content">
             <div class="section-title"><i class="fas fa-reply"></i> 別人回覆你的貼文</div>
-            <div id="repliesToMeList"><div class="empty-state"><i class="fas fa-spinner fa-spin"></i>載入中...</div></div>
+            <div id="repliesToMeList">
+                <div class="skeleton-stock-card"><div class="skeleton-block" style="height:13px; width:55%; margin-bottom:10px;"></div><div class="skeleton-block" style="height:12px; width:90%;"></div></div>
+                <div class="skeleton-stock-card"><div class="skeleton-block" style="height:13px; width:55%; margin-bottom:10px;"></div><div class="skeleton-block" style="height:12px; width:90%;"></div></div>
+            </div>
 
             <div class="section-title second"><i class="fas fa-file-lines"></i> 我發布的貼文</div>
-            <div id="myPostsList"><div class="empty-state"><i class="fas fa-spinner fa-spin"></i>載入中...</div></div>
+            <div id="myPostsList">
+                <div class="skeleton-stock-card"><div class="skeleton-block" style="height:14px; width:35%; margin-bottom:10px;"></div><div class="skeleton-block" style="height:12px; width:95%; margin-bottom:6px;"></div><div class="skeleton-block" style="height:12px; width:70%;"></div></div>
+                <div class="skeleton-stock-card"><div class="skeleton-block" style="height:14px; width:35%; margin-bottom:10px;"></div><div class="skeleton-block" style="height:12px; width:95%; margin-bottom:6px;"></div><div class="skeleton-block" style="height:12px; width:70%;"></div></div>
+            </div>
         </div>
     </div>
 
+    <div class="toast" id="toast"></div>
+
     <script>
         const API_BASE_URL = "https://128gzb5evxna.shares.zrok.io";
+
+        // --- 防止儲存型XSS：所有使用者輸入的文字，放進HTML之前一律先跳脫 ---
+        function escHtml(v) {
+            return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        // 貼文/留言內容：只放行「本站上傳圖片」這一種標籤(發文時由程式自己產生)，其餘HTML一律當純文字顯示。
+        // 圖片網址一律用檔名重組成本站網址，不採用內容裡寫的網址
+        const APP_IMG_RE = /<br><img src="[^"<>]*\/uploads\/([A-Za-z0-9_.\-]+)" style="max-width:100%; border-radius:8px; margin-top:10px;">/g;
+        function renderPostContent(raw, linkTickers) {
+            raw = String(raw == null ? '' : raw);
+            const textPart = s => {
+                const e = escHtml(s);
+                return linkTickers
+                    ? e.replace(/([0-9]{4})/g, '<a href="dashboard.html?symbol=$1" style="color: #38bdf8; text-decoration: none; font-weight: bold; border-bottom: 1px dashed #38bdf8;">$1</a>')
+                    : e;
+            };
+            let out = '', last = 0, m;
+            APP_IMG_RE.lastIndex = 0;
+            while ((m = APP_IMG_RE.exec(raw)) !== null) {
+                out += textPart(raw.slice(last, m.index));
+                out += `<br><img src="${API_BASE_URL}/uploads/${m[1]}" style="max-width:100%; border-radius:8px; margin-top:10px;">`;
+                last = m.index + m[0].length;
+            }
+            return out + textPart(raw.slice(last));
+        }
 
         // --- Zrok 攔截頁繞過 + JWT Auth Interceptor ---
         const originalFetch = window.fetch;
@@ -77,6 +132,9 @@
                 }
             }
             const response = await originalFetch(resource, config);
+            if (response.status === 403 && typeof resource === 'string' && resource.includes(API_BASE_URL)) {
+                response.clone().json().then(b => { if (b && b.detail && b.detail.code === 'CONSENT_REQUIRED') window.location.href = 'consent.html?required=1'; }).catch(() => {});
+            }
             if (response.status === 401) {
                 localStorage.removeItem('access_token');
                 window.location.href = 'login.html';
@@ -87,6 +145,13 @@
 
         if (!localStorage.getItem('access_token')) {
             window.location.href = 'login.html';
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.innerText = msg;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 2500);
         }
 
         let currentUserEmail = null;
@@ -112,7 +177,7 @@
                 const me = await meRes.json();
                 currentUserEmail = me.email;
 
-                const postsRes = await fetch(`${API_BASE_URL}/api/posts`);
+                const postsRes = await fetch(`${API_BASE_URL}/api/my_posts?limit=100`);
                 const allPosts = await postsRes.json();
                 allPostsCache = allPosts;
 
@@ -132,9 +197,9 @@
                 } else {
                     repliesEl.innerHTML = allReplies.slice(0, 20).map(r => `
                         <div class="reply-card">
-                            <span class="who">${r.author}</span><span class="on">回覆了你在「${r.postTag || '未分類'}」的貼文</span>
-                            <div class="body">${r.content}</div>
-                            <div class="time">${r.time || ''}</div>
+                            <span class="who">${escHtml(r.author)}</span><span class="on">回覆了你在「${escHtml(r.postTag || '未分類')}」的貼文</span>
+                            <div class="body">${renderPostContent(r.content, false)}</div>
+                            <div class="time">${escHtml(r.time || '')}</div>
                         </div>
                     `).join('');
                 }
@@ -145,9 +210,9 @@
                 } else {
                     postsEl.innerHTML = myPosts.map(post => `
                         <div class="post-card" id="post-card-${post.id}">
-                            <div class="post-tag">${post.tag || '未分類'}</div>
+                            <div class="post-tag">${escHtml(post.tag || '未分類')}</div>
                             <div id="post-view-${post.id}">
-                                <div class="post-content" id="post-content-${post.id}">${post.content}</div>
+                                <div class="post-content" id="post-content-${post.id}">${renderPostContent(post.content, false)}</div>
                             </div>
                             <div class="post-footer">
                                 <div class="post-stats">
@@ -156,7 +221,7 @@
                                 </div>
                                 <div class="post-actions" id="post-actions-${post.id}">
                                     <span class="rip-btn action-edit" onclick="startEdit(${post.id})"><i class="fas fa-pen"></i> 編輯</span>
-                                    <span class="rip-btn action-delete" onclick="deleteMyPost(${post.id})"><i class="fas fa-trash"></i> 刪除</span>
+                                    <span class="rip-btn action-delete" onclick="deleteMyPost(${post.id}, this)"><i class="fas fa-trash"></i> 刪除</span>
                                 </div>
                             </div>
                         </div>
@@ -165,7 +230,7 @@
             } catch (err) {
                 console.error(err);
                 repliesEl.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-triangle"></i>載入失敗，請檢查網路連線</div>`;
-                postsEl.innerHTML = '';
+                postsEl.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-triangle"></i>載入失敗，請稍後再試</div>`;
             }
         }
 
@@ -173,19 +238,25 @@
             const post = allPostsCache.find(p => p.id === postId);
             if (!post) return;
             const viewEl = document.getElementById(`post-view-${postId}`);
-            viewEl.innerHTML = `<textarea class="post-edit-area" id="post-edit-input-${postId}">${post.content}</textarea>`;
+            viewEl.innerHTML = `<textarea class="post-edit-area" id="post-edit-input-${postId}">${escHtml(post.content)}</textarea>`;
             document.getElementById(`post-actions-${postId}`).innerHTML = `
-                <span class="rip-btn action-save" onclick="saveEdit(${postId})"><i class="fas fa-check"></i> 儲存</span>
+                <span class="rip-btn action-save" onclick="saveEdit(${postId}, this)"><i class="fas fa-check"></i> 儲存</span>
                 <span class="rip-btn action-cancel" onclick="loadMyPosts()"><i class="fas fa-xmark"></i> 取消</span>
             `;
         }
 
-        async function saveEdit(postId) {
+        async function saveEdit(postId, btn) {
             const input = document.getElementById(`post-edit-input-${postId}`);
             const newContent = input.value.trim();
             if (!newContent) {
-                alert('內容不能是空的');
+                showToast('內容不能是空的');
                 return;
+            }
+            if (btn) {
+                if (btn.disabled) return;
+                btn.disabled = true;
+                btn.style.pointerEvents = 'none';
+                btn.style.opacity = '0.5';
             }
             try {
                 const res = await fetch(`${API_BASE_URL}/api/posts/${postId}`, {
@@ -197,19 +268,37 @@
                 loadMyPosts();
             } catch (err) {
                 console.error(err);
-                alert('更新失敗，請稍後再試');
+                showToast('更新失敗，請稍後再試');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.style.pointerEvents = '';
+                    btn.style.opacity = '';
+                }
             }
         }
 
-        async function deleteMyPost(postId) {
+        async function deleteMyPost(postId, btn) {
             if (!confirm('確定要刪除這篇貼文嗎？此動作無法復原。')) return;
+            if (btn) {
+                if (btn.disabled) return;
+                btn.disabled = true;
+                btn.style.pointerEvents = 'none';
+                btn.style.opacity = '0.5';
+            }
             try {
                 const res = await fetch(`${API_BASE_URL}/api/posts/${postId}`, { method: 'DELETE' });
                 if (!res.ok) throw new Error('刪除失敗');
                 loadMyPosts();
             } catch (err) {
                 console.error(err);
-                alert('刪除失敗，請稍後再試');
+                showToast('刪除失敗，請稍後再試');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.style.pointerEvents = '';
+                    btn.style.opacity = '';
+                }
             }
         }
 

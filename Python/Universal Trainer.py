@@ -9,7 +9,7 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 import xgboost as xgb
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, precision_recall_fscore_support
 from sklearn.model_selection import train_test_split
 from sqlalchemy import create_engine, text
 from config import MYSQL_CONN_STR
@@ -87,7 +87,7 @@ def train_brain():
             Sentiment_Score AS 情緒分數,
             MA_5 AS `5日均線`, MA_20 AS `20日均線`, MA_60 AS `60日均線`
         FROM StockPrice
-        ORDER BY 股票代碼, 交易日期
+        ORDER BY 交易日期, 股票代碼
     """
     with engine.connect() as conn:
         df = pd.read_sql(text(query), conn)
@@ -103,9 +103,10 @@ def train_brain():
 
     print(f"🏷️ 正在標註明日漲跌目標...")
     # 預測目標：明天收盤 > 今天收盤
-    df['target'] = df.groupby('股票代碼')['收盤價'].apply(
-        lambda x: (x.shift(-1) > x).astype(int)
-    ).reset_index(level=0, drop=True)
+    # 每檔股票最後一個交易日還沒有「明天」，不能標成「沒漲」：pandas 裡 NaN > x 是 False，
+    # 舊寫法會把每檔股票的最後一天全標成 0(跌)，而測試集正好取最新的資料，等於測試集混進一批假標籤
+    next_close = df.groupby('股票代碼')['收盤價'].shift(-1)
+    df['target'] = (next_close > df['收盤價']).astype(int).where(next_close.notna())
 
     # 檢查特徵完整性
     available_features = [c for c in UNIVERSAL_FEATURES if c in df.columns]
@@ -118,7 +119,7 @@ def train_brain():
     
     # 關鍵：處理斜率計算產生的 Inf 與 NaN
     X = df_clean[available_features].replace([np.inf, -np.inf], np.nan).fillna(0)
-    y = df_clean['target']
+    y = df_clean['target'].astype(int)
 
     # --- 時間序列分割 ---
     test_size = 200000
@@ -167,6 +168,15 @@ def train_brain():
     acc = accuracy_score(y_test, y_pred)
     
     print(f"🎯 預測準確率: {acc:.2%}")
+
+    # 準確率有盲點（如果多數天數都漲，永遠猜漲也有不錯的準確率），所以一併算精確率、召回率、F1，
+    # 並跟「永遠猜多數類別」的基準線比較。標籤：1=隔日上漲、0=隔日未上漲
+    prec, rec, f1, _ = precision_recall_fscore_support(y_test, y_pred, labels=[0, 1], zero_division=0)
+    tn, fp, fn, tp = confusion_matrix(y_test, y_pred, labels=[0, 1]).ravel()
+    up_rate = float(y_test.mean())
+    majority_baseline = max(up_rate, 1 - up_rate)
+    print(classification_report(y_test, y_pred, target_names=["Down", "Up"], zero_division=0))
+    print(f"混淆矩陣 TN={tn} FP={fp} FN={fn} TP={tp}；測試集上漲比例 {up_rate:.2%}；多數類別基準線 {majority_baseline:.2%}")
     
     importance = pd.Series(model.feature_importances_, index=available_features).sort_values(ascending=False)
     print("\n🔥 特徵決策貢獻排行 Top 15 (請確認三大法人是否上榜)：")
@@ -176,6 +186,15 @@ def train_brain():
     importance_output = {
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "accuracy": round(float(acc), 4),
+        "metrics": {
+            "test_size": int(test_size),
+            "up_rate": round(up_rate, 4),
+            "majority_baseline": round(majority_baseline, 4),
+            "edge_over_majority": round(float(acc) - majority_baseline, 4),
+            "precision_up": round(float(prec[1]), 4), "recall_up": round(float(rec[1]), 4), "f1_up": round(float(f1[1]), 4),
+            "precision_down": round(float(prec[0]), 4), "recall_down": round(float(rec[0]), 4), "f1_down": round(float(f1[0]), 4),
+            "confusion": {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)},
+        },
         "features": [
             {"name": name, "importance": round(float(val), 6)}
             for name, val in importance.head(15).items()

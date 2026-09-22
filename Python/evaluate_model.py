@@ -1,5 +1,9 @@
 # =============================================
 # FutureWise 模型快速評估腳本
+# ⚠️ 這支讀的是本機的「股票清單_Cloud.csv」(舊的快照)，不是資料庫。
+#    模型是用資料庫的全部資料訓練的，CSV 涵蓋的期間很可能已經在訓練集裡，
+#    這樣量出來的準確率是「用訓練過的資料考試」，會偏高，不能拿來寫報告。
+#    要量測報告用的準確率，請改用 evaluate_model_db.py
 # =============================================
 import pandas as pd
 import numpy as np
@@ -34,16 +38,20 @@ def perform_feature_engineering(df):
 print("[1/5] Loading data...")
 df = pd.read_csv("股票清單_Cloud.csv", dtype={'股票代碼': str})
 df["股票代碼"] = df["股票代碼"].astype(str).str.replace('="', '').str.replace('"', '')
-df = df.sort_values(["股票代碼", "交易日期"])
+# 排序要先照日期再照股票代碼，不然下面用iloc[-test_size:]切測試集時，
+# 切到的會是「代碼排序最後面那幾檔股票的全部歷史」而不是「全市場最近一段期間」，
+# 等於訓練集看得到測試集同期間其他股票的大盤/總經特徵，回測分數會失真（跟Universal Trainer.py同一種bug）
+df = df.sort_values(["交易日期", "股票代碼"])
 print(f"      Loaded {len(df):,} rows")
 
 print("[2/5] Feature engineering...")
 df = perform_feature_engineering(df)
 
 print("[3/5] Labeling target (next day up/down)...")
-df['target'] = df.groupby('股票代碼')['收盤價'].apply(
-    lambda x: (x.shift(-1) > x).astype(int)
-).reset_index(level=0, drop=True)
+# 每檔股票最後一個交易日還沒有「明天」，不能標成「沒漲」：pandas 裡 NaN > x 是 False，
+# 舊寫法會把每檔股票的最後一天全標成 0(跌)，而測試集正好取最新的資料，等於測試集混進一批假標籤
+next_close = df.groupby('股票代碼')['收盤價'].shift(-1)
+df['target'] = (next_close > df['收盤價']).astype(int).where(next_close.notna())
 
 available_features = [c for c in UNIVERSAL_FEATURES if c in df.columns]
 missing = set(UNIVERSAL_FEATURES) - set(available_features)
@@ -52,7 +60,7 @@ if missing:
 
 df_clean = df.dropna(subset=['target']).copy()
 X = df_clean[available_features].replace([np.inf, -np.inf], np.nan).fillna(0)
-y = df_clean['target']
+y = df_clean['target'].astype(int)
 
 test_size = 200000
 if len(X) < test_size * 2:

@@ -6,6 +6,16 @@
     <title>FutureWise AI - 社群討論</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
+        /* 設計語彙（跟dashboard.html同一套shadcn/ui風格token，統一全站視覺質感） */
+        :root {
+            --sc-radius: 0.75rem;
+            --sc-card-bg: #17181c;
+            --sc-card-border: rgba(255,255,255,0.08);
+            --sc-muted-fg: #94a3b8;
+            --sc-up: #ef4444;   /* 台股慣例：紅漲 */
+            --sc-down: #22c55e; /* 台股慣例：綠跌 */
+        }
+
         /* 基礎設定與深色背景 */
         body { margin: 0; padding: 0; background-color: #000000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; color: #ffffff; }
         .app-container { width: 100%; max-width: 414px; height: 100vh; background-color: #121212; position: relative; display: flex; flex-direction: column; box-shadow: 0 0 20px rgba(255, 255, 255, 0.05); overflow: hidden; }
@@ -18,7 +28,7 @@
         .ai-summary-header { display: flex; align-items: center; gap: 8px; color: #38bdf8; font-weight: bold; margin-bottom: 8px; font-size: 15px; }
         .ai-summary p { margin: 0; font-size: 14px; color: #e2e8f0; line-height: 1.5; }
         .feed-column { display: flex; flex-direction: column; gap: 12px; }
-        .comment-card { background-color: #1e1e1e; border-radius: 10px; padding: 12px; border: 1px solid #2a2a2a; animation: fadeIn 0.4s ease-in-out; }
+        .comment-card { background: var(--sc-card-bg); border-radius: var(--sc-radius); padding: 12px; border: 1px solid var(--sc-card-border); animation: fadeIn 0.4s ease-in-out; }
         @keyframes skeleton-pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
         .skeleton-block { background-color: #2a2a2a; border-radius: 6px; animation: skeleton-pulse 1.4s ease-in-out infinite; }
         .skeleton-post-card { background-color: #1e1e1e; border-radius: 10px; padding: 12px; border: 1px solid #2a2a2a; margin-bottom: 12px; }
@@ -75,6 +85,11 @@
         .reply-submit-btn { background-color: #38bdf8; color: #000; border: none; padding: 0 15px; border-radius: 20px; cursor: pointer; font-weight: bold; font-size: 13px; }
             .rip-btn { position: relative; overflow: hidden; }
         .rip-ink { position: absolute; border-radius: 50%; background: rgba(255,255,255,0.35); pointer-events: none; transform: scale(0); opacity: 0.6; transition: transform 0.55s ease, opacity 0.55s ease; }
+        /* fab-button 需要維持絕對定位（漂浮按鈕），避免被 .rip-btn 的 position:relative 蓋掉 */
+        .fab-button.rip-btn { position: absolute; }
+
+        .toast { position: fixed; bottom: 30px; left: 50%; background: #1e1e1e; border: 1px solid #38bdf8; color: #e2e8f0; padding: 10px 20px; border-radius: 20px; font-size: 13px; opacity: 0; pointer-events: none; z-index: 50; transform: translateX(-50%) translateY(16px) scale(0.9); transition: opacity 0.25s ease, transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
     </style>
 </head>
 <body>
@@ -83,7 +98,7 @@
         <div class="header">
             <div class="header-title"><i class="fas fa-users"></i> 社群與輿情</div>
             <div style="display: flex; align-items: center;">
-                <button id="sortBtn" onclick="toggleSort()" style="background: none; border: 1px solid #38bdf8; color: #38bdf8; border-radius: 12px; padding: 4px 10px; font-size: 12px; cursor: pointer; margin-right: 15px;">最新排序</button>
+                <button id="sortBtn" onclick="toggleSort()" class="rip-btn" style="background: none; border: 1px solid #38bdf8; color: #38bdf8; border-radius: 12px; padding: 4px 10px; font-size: 12px; cursor: pointer; margin-right: 15px;">最新排序</button>
                 <a href="profile.html" style="color: #a0a0a0; text-decoration: none; font-size: 18px; position: relative;"><i class="fas fa-user-circle"></i><span class="header-badge-dot" id="profileBadgeDot"></span></a>
             </div>
         </div>
@@ -119,7 +134,7 @@
             </div>
         </div>
 
-        <button type="button" class="fab-button" onclick="openModal()">
+        <button type="button" class="fab-button rip-btn" onclick="openModal()">
             <i class="fas fa-pen"></i> 發新討論
         </button>
 
@@ -168,9 +183,37 @@
         </div>
     </div>
 
+    <div class="toast" id="toast"></div>
+
     <script>
         // 設定指向後端 API，確保熱門討論與上傳功能正常對接
         const API_BASE_URL = "https://128gzb5evxna.shares.zrok.io";
+
+        // --- 防止儲存型XSS：所有使用者輸入的文字，放進HTML之前一律先跳脫 ---
+        function escHtml(v) {
+            return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        // 貼文/留言內容：只放行「本站上傳圖片」這一種標籤(發文時由程式自己產生)，其餘HTML一律當純文字顯示。
+        // 圖片網址一律用檔名重組成本站網址，不採用內容裡寫的網址
+        const APP_IMG_RE = /<br><img src="[^"<>]*\/uploads\/([A-Za-z0-9_.\-]+)" style="max-width:100%; border-radius:8px; margin-top:10px;">/g;
+        function renderPostContent(raw, linkTickers) {
+            raw = String(raw == null ? '' : raw);
+            const textPart = s => {
+                const e = escHtml(s);
+                return linkTickers
+                    ? e.replace(/([0-9]{4})/g, '<a href="dashboard.html?symbol=$1" style="color: #38bdf8; text-decoration: none; font-weight: bold; border-bottom: 1px dashed #38bdf8;">$1</a>')
+                    : e;
+            };
+            let out = '', last = 0, m;
+            APP_IMG_RE.lastIndex = 0;
+            while ((m = APP_IMG_RE.exec(raw)) !== null) {
+                out += textPart(raw.slice(last, m.index));
+                out += `<br><img src="${API_BASE_URL}/uploads/${m[1]}" style="max-width:100%; border-radius:8px; margin-top:10px;">`;
+                last = m.index + m[0].length;
+            }
+            return out + textPart(raw.slice(last));
+        }
 
         // --- JWT Auth Interceptor ---
         const originalFetch = window.fetch;
@@ -186,21 +229,36 @@
                 }
             }
             const response = await originalFetch(resource, config);
+            if (response.status === 403 && typeof resource === 'string' && resource.includes(API_BASE_URL)) {
+                response.clone().json().then(b => { if (b && b.detail && b.detail.code === 'CONSENT_REQUIRED') window.location.href = 'consent.html?required=1'; }).catch(() => {});
+            }
             if(response.status === 401 && !resource.includes('/api/auth/login') && !resource.includes('/api/auth/register')) {
-                alert('登入已過期或權限不足，請重新登入');
-                window.location.href = 'login.html';
+                showToast('登入已過期或權限不足，請重新登入');
+                setTimeout(() => { window.location.href = 'login.html'; }, 1500);
             }
             return response;
         };
         // -----------------------------
- 
-        const LIKED_KEY = 'proquant_liked_posts'; 
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.innerText = msg;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 2500);
+        }
+
+        const LIKED_KEY = 'proquant_liked_posts';
         
         let postsData = [];
         let likedPosts = [];
         let openReplyIds = new Set();
         let lastPostsJson = "";
         let sortBy = 'newest'; // 'newest' 或 'popular'
+        // 分頁：伺服器一次最多給100筆，每次「載入更多」就把要顯示的筆數加一頁；
+        // 每10秒自動更新時會重抓「目前已展開的這個範圍」，所以已經載入的舊貼文不會被重整掉
+        const PAGE_SIZE = 20;
+        let loadedCount = PAGE_SIZE;
+        let hasMore = false;
         let currentUserEmail = null;
         let blockedEmails = new Set();
 
@@ -249,33 +307,56 @@
         function toggleSort() {
             sortBy = sortBy === 'newest' ? 'popular' : 'newest';
             document.getElementById('sortBtn').innerText = sortBy === 'newest' ? '最新排序' : '熱門排序';
-            renderPosts();
+            // 排序是在伺服器做的（不然只會排到已載入的那幾筆），換排序就從第一頁重新開始
+            loadedCount = PAGE_SIZE;
+            lastPostsJson = "";
+            loadPosts();
+        }
+
+        async function loadMorePosts() {
+            loadedCount += PAGE_SIZE;
+            lastPostsJson = "";
+            await loadPosts();
+        }
+
+        async function fetchPostsWindow() {
+            const requests = [];
+            for (let offset = 0; offset < loadedCount; offset += 100) {
+                const limit = Math.min(100, loadedCount - offset);
+                requests.push(fetch(`${API_BASE_URL}/api/posts?limit=${limit}&offset=${offset}&sort=${sortBy}`));
+            }
+            const responses = await Promise.all(requests);
+            if (responses.some(r => !r.ok)) throw new Error("伺服器回應錯誤");
+            const pages = await Promise.all(responses.map(r => r.json()));
+            return pages.flat();
         }
 
         async function loadTrending() {
+            const listEl = document.getElementById('trendingList');
             try {
                 const response = await fetch(`${API_BASE_URL}/api/trending_tags`);
-                if (response.ok) {
-                    const data = await response.json();
-                    const listEl = document.getElementById('trendingList');
-                    listEl.innerHTML = '';
-                    data.trending.forEach((tag, idx) => {
-                        let fires = '<i class="fas fa-fire"></i>'.repeat(Math.max(1, 4 - idx));
-                        listEl.innerHTML += `<li>${idx + 1}. <a href="dashboard.html?symbol=${tag}" style="color: #cbd5e1; text-decoration: none;">${tag}</a> <span class="fire-icon">${fires}</span></li>`;
-                    });
+                if (!response.ok) throw new Error('讀取熱門討論失敗');
+                const data = await response.json();
+                listEl.innerHTML = '';
+                if (!data.trending || data.trending.length === 0) {
+                    listEl.innerHTML = '<li style="color:#94a3b8;">目前尚無熱門標的</li>';
+                    return;
                 }
+                data.trending.forEach((tag, idx) => {
+                    let fires = '<i class="fas fa-fire"></i>'.repeat(Math.max(1, 4 - idx));
+                    listEl.innerHTML += `<li>${idx + 1}. <a href="dashboard.html?symbol=${tag}" style="color: #cbd5e1; text-decoration: none;">${tag}</a> <span class="fire-icon">${fires}</span></li>`;
+                });
             } catch (e) {
                 console.warn("載入熱門討論失敗", e);
+                listEl.innerHTML = '<li style="color:#ef4444;">熱門討論載入失敗，請稍後再試</li>';
             }
         }
 
         // 完全依賴伺服器資料（防閃爍優化版）
         async function loadPosts() {
             try {
-                const response = await fetch(`${API_BASE_URL}/api/posts`);
-                if (!response.ok) throw new Error("伺服器回應錯誤");
-                
-                let newData = await response.json();
+                let newData = await fetchPostsWindow();
+                hasMore = newData.length >= loadedCount;  // 拿滿整個範圍代表後面可能還有
 
                 // 過濾掉被自己封鎖的使用者發的文
                 if (blockedEmails.size > 0) {
@@ -315,7 +396,7 @@
 
             sortedPosts.forEach(post => {
                 const sentimentInfo = getSentimentStyle(post.sentiment);
-                const tagHtml = post.tag ? `<div class="stock-tag">${post.tag}</div>` : '';
+                const tagHtml = post.tag ? `<div class="stock-tag">${escHtml(post.tag)}</div>` : '';
                 const isLiked = likedPosts.includes(post.id);
                 const likeClass = isLiked ? 'liked' : '';
                 const likeIcon = isLiked ? 'fas' : 'far';
@@ -325,8 +406,8 @@
                 if (replies.length > 0) {
                     repliesHtml = replies.map(r => `
                         <div class="reply-item">
-                            <span class="reply-author">${r.author || '匿名'}:</span> ${r.content}
-                            ${r.time ? `<span style="font-size: 10px; color: #64748b; float: right; margin-top: 2px;">${r.time}</span>` : ''}
+                            <span class="reply-author">${escHtml(r.author || '匿名')}:</span> ${renderPostContent(r.content, false)}
+                            ${r.time ? `<span style="font-size: 10px; color: #64748b; float: right; margin-top: 2px;">${escHtml(r.time)}</span>` : ''}
                             <div style="clear: both;"></div>
                             ${currentUserEmail ? `<div style="text-align:right; margin-top:4px;"><span onclick="reportReply(${r.id})" style="font-size:11px; color:#64748b; cursor:pointer;"><i class="fas fa-flag"></i> 檢舉</span></div>` : ''}
                         </div>
@@ -342,19 +423,19 @@
                 const deleteHtml = isOwnPost ? `<span onclick="deletePost(${post.id})" style="color: #ef4444;"><i class="fas fa-trash"></i> 刪除</span>` : '';
                 const reportBlockHtml = (!isOwnPost && currentUserEmail) ? `
                     <span onclick="reportPost(${post.id})"><i class="fas fa-flag"></i> 檢舉</span>
-                    ${post.user_email ? `<span onclick="blockUser('${post.user_email}', '${post.user}')"><i class="fas fa-user-slash"></i> 封鎖</span>` : ''}
+                    ${post.user_email ? `<span data-email="${escHtml(post.user_email)}" data-name="${escHtml(post.user)}" onclick="blockUser(this.dataset.email, this.dataset.name)"><i class="fas fa-user-slash"></i> 封鎖</span>` : ''}
                 ` : '';
 
                 // 股票代號自動超連結 (尋找 4 位數字)，避開 HTML 標籤內部的屬性 (如圖片網址)
-                let displayContent = post.content.replace(/(?![^<]*>)([0-9]{4})/g, '<a href="dashboard.html?symbol=$1" style="color: #38bdf8; text-decoration: none; font-weight: bold; border-bottom: 1px dashed #38bdf8;">$1</a>');
+                let displayContent = renderPostContent(post.content, true);
 
                 const html = `
                 <div class="comment-card">
                     <div class="user-info">
                         <div class="user-profile">
-                            <div class="avatar"><i class="fas ${post.icon || 'fa-user'}"></i></div>
+                            <div class="avatar"><i class="fas ${/^fa-[a-z0-9-]+$/.test(post.icon || '') ? post.icon : 'fa-user'}"></i></div>
                             <div>
-                                <div class="user-name">${post.user}</div>
+                                <div class="user-name">${escHtml(post.user)}</div>
                                 <div class="time-ago">${timeAgo(post.time)}</div>
                             </div>
                         </div>
@@ -375,12 +456,16 @@
                         <div>${repliesHtml}</div>
                         <div class="reply-input-container">
                             <input type="text" id="reply-input-${post.id}" class="reply-input" placeholder="留個言吧...">
-                            <button class="reply-submit-btn" onclick="submitReply(${post.id})" id="reply-btn-${post.id}">送出</button>
+                            <button class="reply-submit-btn rip-btn" onclick="submitReply(${post.id})" id="reply-btn-${post.id}">送出</button>
                         </div>
                     </div>
                 </div>`;
                 container.innerHTML += html;
             });
+
+            if (hasMore) {
+                container.innerHTML += '<div style="text-align:center; margin:10px 0 20px;"><button class="rip-btn" onclick="loadMorePosts()" style="background:none; border:1px solid #38bdf8; color:#38bdf8; border-radius:14px; padding:8px 22px; font-size:13px; cursor:pointer;">載入更多貼文</button></div>';
+            }
         }
 
         function toggleReplies(postId) {
@@ -396,10 +481,15 @@
 
         // 留言發送至伺服器（動態帶入自訂姓名）
         async function submitReply(postId) {
+            const token = localStorage.getItem('access_token');
+            if (!token) {
+                showToast('請先登入才能使用此功能');
+                return;
+            }
             const inputEl = document.getElementById(`reply-input-${postId}`);
             const btnEl = document.getElementById(`reply-btn-${postId}`);
             const content = inputEl.value.trim();
-            if (!content) return; 
+            if (!content) return;
 
             // 動態讀取當前登入者名稱
             const currentUserName = localStorage.getItem('currentUser_name') || "投資人";
@@ -427,7 +517,7 @@
 
             } catch (e) {
                 console.warn("留言同步伺服器失敗", e);
-                alert("留言失敗，請確認網路連線或伺服器狀態");
+                showToast("留言失敗，請確認網路連線或伺服器狀態");
             } finally {
                 btnEl.innerText = "送出";
                 btnEl.disabled = false;
@@ -436,6 +526,11 @@
 
         // 發布新文章（整合圖片上傳與自訂姓名）
         async function submitPost() {
+            const token = localStorage.getItem('access_token');
+            if (!token) {
+                showToast('請先登入才能使用此功能');
+                return;
+            }
             const tag = document.getElementById('postTag').value.trim();
             const sentiment = document.getElementById('postSentiment').value;
             const content = document.getElementById('postContent').value.trim();
@@ -443,7 +538,7 @@
             const fileInput = document.getElementById('postImage');
 
             if (!content) {
-                alert('請輸入內文喔！');
+                showToast('請輸入內文喔！');
                 return;
             }
 
@@ -504,7 +599,7 @@
                 document.querySelector('.content').scrollTo({ top: 0, behavior: 'smooth' });
 
             } catch (error) {
-                alert("發佈失敗，請確認伺服器連線狀態！");
+                showToast("發佈失敗，請確認伺服器連線狀態！");
             } finally {
                 btn.innerText = "發佈文章";
                 btn.disabled = false;
@@ -513,6 +608,11 @@
 
         // 按讚同步至伺服器
         async function toggleLike(postId) {
+            const token = localStorage.getItem('access_token');
+            if (!token) {
+                showToast('請先登入才能使用此功能');
+                return;
+            }
             const postIndex = postsData.findIndex(p => p.id === postId);
             if (postIndex === -1) return;
 
@@ -554,7 +654,7 @@
                 lastPostsJson = ""; // 強制觸發 UI 重新整理
                 await loadPosts();
             } catch (error) {
-                alert("刪除失敗，請確認伺服器連線狀態");
+                showToast("刪除失敗，請確認伺服器連線狀態");
             }
         }
 
@@ -569,10 +669,10 @@
                     body: JSON.stringify({ reason: reason.trim() })
                 });
                 if (!res.ok) throw new Error('檢舉失敗');
-                alert('已收到您的檢舉，我們會盡快處理');
+                showToast('已收到您的檢舉，我們會盡快處理');
             } catch (err) {
                 console.error(err);
-                alert('檢舉失敗，請稍後再試');
+                showToast('檢舉失敗，請稍後再試');
             }
         }
 
@@ -587,10 +687,10 @@
                     body: JSON.stringify({ reason: reason.trim() })
                 });
                 if (!res.ok) throw new Error('檢舉失敗');
-                alert('已收到您的檢舉，我們會盡快處理');
+                showToast('已收到您的檢舉，我們會盡快處理');
             } catch (err) {
                 console.error(err);
-                alert('檢舉失敗，請稍後再試');
+                showToast('檢舉失敗，請稍後再試');
             }
         }
 
@@ -603,14 +703,21 @@
                 blockedEmails.add(targetEmail);
                 lastPostsJson = ""; // 強制重新渲染，濾掉這個使用者的貼文
                 await loadPosts();
-                alert('已封鎖該使用者');
+                showToast('已封鎖該使用者');
             } catch (err) {
                 console.error(err);
-                alert('封鎖失敗，請稍後再試');
+                showToast('封鎖失敗，請稍後再試');
             }
         }
 
-        function openModal() { document.getElementById('postModal').style.display = 'flex'; }
+        function openModal() {
+            const token = localStorage.getItem('access_token');
+            if (!token) {
+                showToast('請先登入才能使用此功能');
+                return;
+            }
+            document.getElementById('postModal').style.display = 'flex';
+        }
         function closeModal() {
             document.getElementById('postModal').style.display = 'none';
             document.getElementById('postTag').value = '';

@@ -101,10 +101,21 @@ def setup_db():
         POSTS_DB_FILE = os.path.join(current_dir, "posts_db.json")
         
         if os.path.exists(POSTS_DB_FILE):
+            # 防呆：這是一次性搬遷用的腳本，如果Posts表已經有真實資料（代表遷移早就做過、
+            # 網站也已經正式上線在用了），絕對不能再清空重跑，不然會把使用者真實發的貼文全部砍掉、
+            # 只還原這份舊JSON快照裡的資料。之前這裡完全沒有防護，只要posts_db.json還留在資料夾裡，
+            # 不管誰、不管什麼原因重新執行這支腳本都會整表清空重建。
+            with engine.connect() as conn:
+                existing_count = conn.execute(text("SELECT COUNT(*) FROM Posts")).scalar()
+            if existing_count and existing_count > 0:
+                print(f"Skip: Posts table already has {existing_count} rows — migration already done previously. "
+                      f"Refusing to re-run and wipe real data. Delete {POSTS_DB_FILE} if you're sure this should never run again.")
+                return
+
             print(f"Data: Found legacy file {POSTS_DB_FILE}, starting migration...")
             with open(POSTS_DB_FILE, "r", encoding="utf-8") as f:
                 old_posts = json.load(f)
-            
+
             with engine.begin() as conn:
                 if db_type == "mysql":
                     conn.execute(text("SET FOREIGN_KEY_CHECKS = 0;"))

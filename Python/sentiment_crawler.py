@@ -11,6 +11,7 @@ import json
 import re
 import time
 import random
+from datetime import datetime
 
 import requests
 from bs4 import BeautifulSoup
@@ -160,8 +161,15 @@ def run_sentiment_crawler(target_ticker=None):
         if target_ticker:
             tickers = [str(target_ticker)]
         else:
-            # 比關鍵字版可以掃更多檔，因為爬蟲成本沒變，只有評分方式換了
-            tickers = df["股票代碼"].unique()[:150]
+            # 原本固定掃前150檔，代碼排序後面的股票永遠輪不到、情緒分數永遠是預設值。
+            # 改成用「今年第幾天」對批次數取餘數來決定今天掃哪一批，讓全市場的股票
+            # 經過幾週的每日排程後都能輪流被掃到，而不是每天都在重複掃同一批
+            all_tickers = df["股票代碼"].unique().tolist()
+            BATCH_SIZE = 150
+            num_batches = max(1, -(-len(all_tickers) // BATCH_SIZE))  # 無條件進位
+            batch_idx = datetime.now().timetuple().tm_yday % num_batches
+            tickers = all_tickers[batch_idx * BATCH_SIZE: (batch_idx + 1) * BATCH_SIZE]
+            print(f"📅 今天是第 {batch_idx + 1}/{num_batches} 批，掃描 {len(tickers)} 檔股票")
 
         engine = create_engine(MYSQL_CONN_STR)
         sentiment_map = {}
@@ -182,20 +190,21 @@ def run_sentiment_crawler(target_ticker=None):
         df["股票代碼"] = df["股票代碼"].apply(lambda x: f'="{x}"')
         df.to_csv("股票清單_Cloud.csv", index=False, encoding='utf-8-sig')
 
-        # 更新 MySQL（維持原本安全語法，避免鎖表）
+        # 更新 MySQL（改用參數化查詢，原本的f-string拼接方式有SQL注入風險，
+        # 而且ticker其實是透過 /api/sentiment/run_crawler/{ticker} 直接對外開放觸發的）
+        query = text("""
+            UPDATE StockPrice
+            SET Sentiment_Score = :score
+            WHERE ticker = :ticker
+            AND trade_date = (
+                SELECT max_date FROM (
+                    SELECT MAX(trade_date) AS max_date FROM StockPrice WHERE ticker = :ticker
+                ) AS tmp
+            )
+        """)
         with engine.begin() as conn:
             for t, s in sentiment_map.items():
-                query = text(f"""
-                    UPDATE StockPrice
-                    SET Sentiment_Score = {s}
-                    WHERE ticker = '{t}'
-                    AND trade_date = (
-                        SELECT max_date FROM (
-                            SELECT MAX(trade_date) AS max_date FROM StockPrice WHERE ticker = '{t}'
-                        ) AS tmp
-                    )
-                """)
-                conn.execute(query)
+                conn.execute(query, {"ticker": t, "score": s})
 
         print("✅ 完成！")
         return {"status": "success"}

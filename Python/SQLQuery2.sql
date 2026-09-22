@@ -129,3 +129,36 @@ SELECT TOP 100 *
 FROM StockPrice
 WHERE ticker = '0050'
 ORDER BY trade_date DESC;
+
+SELECT trade_date, Foreign_Buy, Trust_Buy, Dealer_Buy
+FROM StockPrice
+WHERE ticker = '3374' AND (Foreign_Buy != 0 OR Trust_Buy != 0 OR Dealer_Buy != 0)
+ORDER BY trade_date DESC
+LIMIT 10;
+
+SELECT
+    COUNT(DISTINCT ticker) AS 總股票數,
+    COUNT(DISTINCT CASE WHEN Foreign_Buy != 0 OR Trust_Buy != 0 OR Dealer_Buy != 0 THEN ticker END) AS 曾經有法人資料的股票數
+FROM StockPrice
+WHERE ticker NOT IN ('TSE', 'OTC');
+
+SELECT DISTINCT ticker
+FROM StockPrice
+WHERE ticker NOT IN ('TSE', 'OTC')
+AND ticker NOT IN (
+    SELECT DISTINCT ticker FROM StockPrice
+    WHERE Foreign_Buy != 0 OR Trust_Buy != 0 OR Dealer_Buy != 0
+)
+ORDER BY ticker
+LIMIT 30;
+
+SELECT
+    CASE WHEN ticker LIKE '00%' THEN 'ETF(00開頭)' ELSE '一般股票' END AS 類型,
+    COUNT(DISTINCT ticker) AS 數量
+FROM StockPrice
+WHERE ticker NOT IN ('TSE', 'OTC')
+AND ticker NOT IN (
+    SELECT DISTINCT ticker FROM StockPrice
+    WHERE Foreign_Buy != 0 OR Trust_Buy != 0 OR Dealer_Buy != 0
+)
+GROUP BY 類型;

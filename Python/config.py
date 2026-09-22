@@ -74,3 +74,23 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 # JWT 簽章密鑰（stock_api_server.py 的登入系統用）
 # ==========================================
 JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "")
+
+# ==========================================
+# Email 寄信設定（註冊驗證信、忘記密碼信用）
+# 在 .env 加入（以Gmail為例，SMTP_PASSWORD要用「應用程式密碼」，不是登入密碼）：
+#   SMTP_HOST=smtp.gmail.com
+#   SMTP_PORT=587
+#   SMTP_USER=你的寄件信箱@gmail.com
+#   SMTP_PASSWORD=16碼應用程式密碼
+#   PUBLIC_BASE_URL=https://128gzb5evxna.shares.zrok.io
+# 沒設定SMTP時，系統不會強制Email驗證（避免新註冊的人被鎖在外面），忘記密碼功能也會回報尚未啟用
+# ==========================================
+SMTP_HOST = os.environ.get("SMTP_HOST", "")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+SMTP_FROM = os.environ.get("SMTP_FROM", "") or SMTP_USER
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "https://128gzb5evxna.shares.zrok.io").rstrip("/")
+EMAIL_ENABLED = bool(SMTP_HOST and SMTP_USER and SMTP_PASSWORD)
+# 每天最多寄幾封驗證信/重設信（Gmail 個人帳號每日約 500 封上限，留餘裕；防止公開端點被拿來大量寄信）
+EMAIL_DAILY_LIMIT = int(os.environ.get("EMAIL_DAILY_LIMIT", "300"))

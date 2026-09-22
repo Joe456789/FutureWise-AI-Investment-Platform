@@ -38,11 +38,12 @@
             border-radius: 15px;
             box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
             border: 1px solid rgba(255, 255, 255, 0.1);
-            width: 350px;
+            width: min(350px, calc(100% - 40px)); /* 固定350px在較窄手機寬度(如375px)會被left:10%擠出畫面外，改成不超過視窗寬度 */
+            box-sizing: border-box;
             color: white;
             text-align: center;
             position: absolute;
-            top: 10%;   
+            top: 10%;
             left: 10%;  
             z-index: 10; 
             transition: 0.3s;
@@ -96,6 +97,14 @@
             box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
             background: rgba(255, 255, 255, 0.1);
         }
+        /* 密碼欄位右側「顯示/隱藏密碼」眼睛按鈕 */
+        .pw-wrap { position: relative; }
+        .pw-wrap input[type="password"], .pw-wrap input[type="text"].pw-input { padding-right: 42px; }
+        .pw-toggle { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); background: none; border: none; padding: 6px; cursor: pointer; color: #94a3b8; display: flex; align-items: center; }
+        .pw-toggle:hover { color: #cbd5e1; }
+        .pw-toggle svg { width: 18px; height: 18px; display: block; }
+        .pw-toggle .eye-closed { display: none; }
+
 
         .login-btn, .reset-btn {
             width: 100%;
@@ -141,6 +150,10 @@
         }
             .rip-btn { position: relative; overflow: hidden; }
         .rip-ink { position: absolute; border-radius: 50%; background: rgba(255,255,255,0.35); pointer-events: none; transform: scale(0); opacity: 0.6; transition: transform 0.55s ease, opacity 0.55s ease; }
+        .login-btn:disabled { opacity: 0.7; cursor: not-allowed; transform: none !important; }
+
+        .toast { position: fixed; bottom: 30px; left: 50%; background: #1e1e1e; border: 1px solid #38bdf8; color: #e2e8f0; padding: 10px 20px; border-radius: 20px; font-size: 13px; opacity: 0; pointer-events: none; z-index: 50; transform: translateX(-50%) translateY(16px) scale(0.9); transition: opacity 0.25s ease, transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
     </style>
 </head>
 <body>
@@ -158,10 +171,15 @@
             </div>
             <div class="input-group">
                 <label for="password">Password (密碼)</label>
-                <input type="password" id="password" placeholder="請輸入密碼" required>
+                <div class="pw-wrap"><input type="password" id="password" placeholder="請輸入密碼" required onkeydown="if(event.key === 'Enter'){ event.preventDefault(); handleLogin(); }"><button type="button" class="pw-toggle" tabindex="-1" aria-label="顯示密碼" onclick="togglePw('password', this)"><svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><svg class="eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg></button></div>
             </div>
-            <button type="button" class="login-btn rip-btn" onclick="handleLogin()">System Login</button>
-            
+            <button type="button" class="login-btn rip-btn" id="loginBtn" onclick="handleLogin()">System Login</button>
+
+            <div id="unverifiedBox" style="display:none; margin-top:14px; padding:10px 12px; border-radius:8px; background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.4); font-size:13px; color:#fcd34d; text-align:left; line-height:1.6;">
+                這個 Email 還沒完成驗證，請先到信箱點擊驗證連結。
+                <a href="javascript:void(0)" onclick="resendVerification()" style="color:#38bdf8;">沒收到？重新寄送驗證信</a>
+            </div>
+
             <div class="link-group">
                 <a href="javascript:void(0)" onclick="toggleForgot(true)">忘記密碼？</a>
                 <a href="register.html">立即註冊帳號</a>
@@ -171,31 +189,25 @@
 
     <div class="login-container" id="forgot-panel">
         <h2>重設密碼</h2>
-        <p style="line-height: 1.6;">自動找回密碼功能尚在開發中，如忘記密碼，請透過其他管道聯繫系統管理員協助處理。</p>
+        <p style="line-height: 1.6; margin-bottom: 20px;">請輸入註冊時使用的 Email，我們會寄一封重設密碼的連結給你。</p>
+
+        <form onsubmit="return false;">
+            <div class="input-group">
+                <label for="forgot-email">Email</label>
+                <input type="text" id="forgot-email" placeholder="請輸入註冊 Email" onkeydown="if(event.key === 'Enter'){ event.preventDefault(); handleForgot(); }">
+            </div>
+            <button type="button" class="reset-btn rip-btn" id="forgotBtn" onclick="handleForgot()">寄送重設連結</button>
+        </form>
 
         <div class="link-group" style="justify-content: center;">
             <a href="javascript:void(0)" onclick="toggleForgot(false)" style="color: #94a3b8;">← 返回登入</a>
         </div>
     </div>
 
+    <div class="toast" id="toast"></div>
+
     <script>
-        // 切換面板顯示
-        function toggleForgot(show) {
-            document.getElementById('login-panel').style.display = show ? 'none' : 'block';
-            document.getElementById('forgot-panel').style.display = show ? 'block' : 'none';
-        }
-
-        // 登入邏輯
-        function handleLogin() {
-            const user = document.getElementById('username').value;
-            const pass = document.getElementById('password').value;
-
-            if(!user || !pass) {
-                alert('請輸入帳號和密碼！');
-                return;
-            }
-
-            const API_BASE_URL = "https://128gzb5evxna.shares.zrok.io";
+        const API_BASE_URL = "https://128gzb5evxna.shares.zrok.io";
 
         // --- Zrok 攔截頁繞過 + JWT Auth Interceptor ---
         const originalFetch = window.fetch;
@@ -214,6 +226,92 @@
         };
         // -----------------------------
 
+
+        // 密碼欄位右側的「顯示/隱藏密碼」眼睛按鈕
+        function togglePw(inputId, btn) {
+            const input = document.getElementById(inputId);
+            const show = input.type === 'password';
+            input.type = show ? 'text' : 'password';
+            input.classList.toggle('pw-input', show);
+            btn.querySelector('.eye-open').style.display = show ? 'none' : '';
+            btn.querySelector('.eye-closed').style.display = show ? '' : 'none';
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.innerText = msg;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 2500);
+        }
+
+        // 切換面板顯示
+        function toggleForgot(show) {
+            document.getElementById('login-panel').style.display = show ? 'none' : 'block';
+            document.getElementById('forgot-panel').style.display = show ? 'block' : 'none';
+        }
+
+        // 忘記密碼：伺服器不論Email存不存在都回一樣的訊息（避免被拿來探測誰註冊過），所以這裡也只顯示通用提示
+        async function postAuth(path, payload) {
+            const res = await fetch(API_BASE_URL + path, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const body = await res.json().catch(() => ({}));
+            return { ok: res.ok, status: res.status, body };
+        }
+
+        async function handleForgot() {
+            const email = document.getElementById('forgot-email').value.trim();
+            const btn = document.getElementById('forgotBtn');
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                showToast('請輸入正確的Email格式');
+                return;
+            }
+            btn.disabled = true;
+            try {
+                const r = await postAuth('/api/auth/forgot_password', { email });
+                showToast(r.ok ? r.body.message : (typeof r.body.detail === 'string' ? r.body.detail : '送出失敗，請稍後再試'));
+            } catch (err) {
+                console.error(err);
+                showToast('連線伺服器失敗，請稍後再試。');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function resendVerification() {
+            const email = document.getElementById('username').value.trim();
+            try {
+                const r = await postAuth('/api/auth/resend_verification', { email });
+                showToast(r.ok ? r.body.message : (typeof r.body.detail === 'string' ? r.body.detail : '送出失敗，請稍後再試'));
+            } catch (err) {
+                console.error(err);
+                showToast('連線伺服器失敗，請稍後再試。');
+            }
+        }
+
+        // 登入邏輯
+        function handleLogin() {
+            const user = document.getElementById('username').value;
+            const pass = document.getElementById('password').value;
+            const btn = document.getElementById('loginBtn');
+
+            if(!user || !pass) {
+                showToast('請輸入帳號和密碼！');
+                return;
+            }
+
+            const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailPattern.test(user)) {
+                showToast('請輸入正確的Email格式');
+                return;
+            }
+
+            const originalBtnText = btn.innerText;
+            btn.disabled = true;
+            btn.innerText = '登入中...';
+
             fetch(API_BASE_URL + '/api/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -221,20 +319,30 @@
             })
             .then(res => res.json().then(data => ({status: res.status, body: data})))
             .then(result => {
+                document.getElementById('unverifiedBox').style.display = 'none';
                 if(result.status === 200) {
                     localStorage.setItem('access_token', result.body.access_token);
-                    alert('登入成功！');
-                    window.location.href = 'dashboard.html'; 
+                    showToast('登入成功！');
+                    // 有新版必要條款還沒同意的話，先去同意頁，同意完才進系統
+                    const next = result.body.consent_required ? 'consent.html?required=1' : 'dashboard.html';
+                    setTimeout(() => { window.location.href = next; }, 800);
+                } else if (result.status === 403 && result.body.detail && result.body.detail.code === 'EMAIL_NOT_VERIFIED') {
+                    document.getElementById('unverifiedBox').style.display = 'block';
                 } else {
-                    alert('登入失敗：' + (result.body.detail || '帳號或密碼錯誤'));
+                    const detail = result.body.detail;
+                    showToast('登入失敗：' + (typeof detail === 'string' ? detail : '帳號或密碼錯誤'));
                 }
             })
             .catch(err => {
                 console.error(err);
-                alert('連線伺服器失敗，請稍後再試。');
+                showToast('連線伺服器失敗，請稍後再試。');
+            })
+            .finally(() => {
+                btn.disabled = false;
+                btn.innerText = originalBtnText;
             });
         }
-        
+
     </script>
     <script>
         document.addEventListener('click', function(e) {

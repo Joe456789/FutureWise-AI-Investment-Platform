@@ -392,11 +392,11 @@ def run_scanner():
             
             # 針對每一檔進行掃描
             for ticker in tickers:
-                query_data = f"SELECT * FROM StockPrice WHERE ticker = '{ticker}' ORDER BY trade_date DESC LIMIT 60"
+                query_data = "SELECT * FROM StockPrice WHERE ticker = :ticker ORDER BY trade_date DESC LIMIT 60"
                 if engine.dialect.name == 'mssql':
-                    query_data = f"SELECT TOP 60 * FROM StockPrice WHERE ticker = '{ticker}' ORDER BY trade_date DESC"
-                    
-                df = pd.read_sql(text(query_data), conn)
+                    query_data = "SELECT TOP 60 * FROM StockPrice WHERE ticker = :ticker ORDER BY trade_date DESC"
+
+                df = pd.read_sql(text(query_data), conn, params={"ticker": ticker})
                 if len(df) < 30: continue
                 
                 # 反轉讓日期舊到新

@@ -24,6 +24,10 @@
 
         .empty-state { text-align: center; color: #94a3b8; margin-top: 80px; }
         .empty-state i { font-size: 40px; margin-bottom: 15px; color: #333; }
+
+        @keyframes skeleton-pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+        .skeleton-block { background-color: #2a2a2a; border-radius: 6px; animation: skeleton-pulse 1.4s ease-in-out infinite; }
+        .skeleton-stock-card { background-color: #1e1e1e; border-radius: 12px; padding: 15px; margin-bottom: 12px; border: 1px solid #2a2a2a; }
             .rip-btn { position: relative; overflow: hidden; }
         .rip-ink { position: absolute; border-radius: 50%; background: rgba(255,255,255,0.35); pointer-events: none; transform: scale(0); opacity: 0.6; transition: transform 0.55s ease, opacity 0.55s ease; }
     </style>
@@ -37,7 +41,18 @@
         </div>
 
         <div class="content" id="historyList">
-            <div class="empty-state"><i class="fas fa-spinner fa-spin"></i><div>載入中...</div></div>
+            <div class="skeleton-stock-card">
+                <div class="skeleton-block" style="height:15px; width:50%; margin-bottom:10px;"></div>
+                <div class="skeleton-block" style="height:12px; width:30%;"></div>
+            </div>
+            <div class="skeleton-stock-card">
+                <div class="skeleton-block" style="height:15px; width:50%; margin-bottom:10px;"></div>
+                <div class="skeleton-block" style="height:12px; width:30%;"></div>
+            </div>
+            <div class="skeleton-stock-card">
+                <div class="skeleton-block" style="height:15px; width:50%; margin-bottom:10px;"></div>
+                <div class="skeleton-block" style="height:12px; width:30%;"></div>
+            </div>
         </div>
     </div>
 
@@ -57,7 +72,11 @@
                     config.headers['Authorization'] = 'Bearer ' + token;
                 }
             }
-            return originalFetch(resource, config);
+            const __resp = await originalFetch(resource, config);
+            if (__resp.status === 403 && typeof resource === 'string' && resource.includes(API_BASE_URL)) {
+                __resp.clone().json().then(b => { if (b && b.detail && b.detail.code === 'CONSENT_REQUIRED') window.location.href = 'consent.html?required=1'; }).catch(() => {});
+            }
+            return __resp;
         };
         // -----------------------------
         const token = localStorage.getItem('access_token');
@@ -83,6 +102,10 @@
                     window.location.href = 'login.html';
                     return;
                 }
+                if (!res.ok) {
+                    listEl.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><div>載入失敗，請稍後再試</div></div>`;
+                    return;
+                }
                 const data = await res.json();
 
                 if (!data.length) {
@@ -91,7 +114,7 @@
                 }
 
                 listEl.innerHTML = data.map(item => `
-                    <div class="history-item" onclick="window.location.href='ai_analysis.html?ticker=${item.ticker}'">
+                    <div class="history-item rip-btn" onclick="window.location.href='ai_analysis.html?ticker=${item.ticker}'">
                         <div class="history-icon"><i class="fas fa-chart-line"></i></div>
                         <div class="history-main">
                             <div class="history-ticker">${item.stock_name || ''} (${item.ticker})</div>

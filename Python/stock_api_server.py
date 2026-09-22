@@ -1,15 +1,17 @@
 # 程式名稱：FutureWise 正式版後端 API 伺服器 (MySQL 雲端版 + AI 預測)
+import re
+import json
 from fastapi import FastAPI, HTTPException, Depends, status
 from pydantic import BaseModel
 from passlib.context import CryptContext
 import jwt
 from fastapi.security import OAuth2PasswordBearer
 from datetime import timedelta
-from typing import List, Optional
+from typing import List, Optional, Literal
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import UploadFile, File
 import shutil
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, bindparam
 import pandas as pd
 import uvicorn
 from datetime import datetime, date
@@ -26,9 +28,19 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 os.makedirs(os.path.join(current_dir, "uploads"), exist_ok=True)
 
 # 引入連線字串與自訂模組
-from config import MYSQL_CONN_STR, GEMINI_API_KEY, JWT_SECRET_KEY
+from config import (MYSQL_CONN_STR, GEMINI_API_KEY, JWT_SECRET_KEY,
+                    SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM, PUBLIC_BASE_URL, EMAIL_ENABLED,
+                    EMAIL_DAILY_LIMIT)
 import google.generativeai as genai
 import sentiment_crawler
+import random
+import secrets
+import hashlib
+import smtplib
+from email.mime.text import MIMEText
+from email.header import Header
+from fastapi import BackgroundTasks
+from auth_schema import ensure_auth_schema
 
 # 建立全域資料庫連線池 (Connection Pool)
 # pool_pre_ping=True 可確保每次連線前進行 PING 測試，防止連線閒置斷開導致 API 當機
@@ -40,13 +52,68 @@ if GEMINI_API_KEY and GEMINI_API_KEY != "在這裡填入您的金鑰":
 
 app = FastAPI(title="FutureWise AI API Terminal", version="3.0.0")
 
+# 頻率限制：記錄存在資料庫(RateLimits表)，不是記憶體——API是uvicorn多worker，
+# 各worker的記憶體互相獨立，記憶體版限制會被多個worker平均稀釋，等於形同虛設。
+# 用 SELECT ... FOR UPDATE 鎖住同一個key的那一列，多個worker同時進來也不會同時通過。
+def _rl_key(*parts: str) -> str:
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+def enforce_rate_limit(user_email: str, action: str, cooldown_seconds: int):
+    """同一個key(使用者/Email)對同一個動作，要間隔至少cooldown_seconds秒才能再觸發，否則回429"""
+    key = _rl_key("cooldown", action, user_email)
+    now = time.time()
+    wait = None
+    try:
+        with engine.begin() as conn:
+            row = conn.execute(text("SELECT last_call FROM RateLimits WHERE rl_key = :k FOR UPDATE"), {"k": key}).fetchone()
+            if row and now - float(row[0]) < cooldown_seconds:
+                wait = max(1, int(cooldown_seconds - (now - float(row[0]))))
+            else:
+                conn.execute(text("""
+                    INSERT INTO RateLimits (rl_key, last_call, hits) VALUES (:k, :n, 1)
+                    ON DUPLICATE KEY UPDATE last_call = :n, hits = hits + 1
+                """), {"k": key, "n": now})
+            if random.random() < 0.01:  # 順手清掉兩天前的舊記錄，避免表無限成長
+                conn.execute(text("DELETE FROM RateLimits WHERE last_call < :old"), {"old": now - 2 * 86400})
+    except Exception as e:
+        print(f"⚠️ 頻率限制檢查失敗，本次放行：{e}")  # 資料庫本身出問題時整個API都會壞，這裡寧可放行不要多一個失敗點
+        return
+    if wait is not None:
+        raise HTTPException(status_code=429, detail=f"操作過於頻繁，請等待約 {wait} 秒後再試一次")
+
+def reserve_daily_quota(action: str, limit: int, message: str):
+    """全站每日總量上限（例如每天最多寄N封信），超過回503。跟單一使用者的冷卻時間互補：
+    冷卻時間擋不住『每次換一個Email』的濫用，總量上限才擋得住"""
+    key = _rl_key("daily", action, date.today().isoformat())
+    now = time.time()
+    over = False
+    try:
+        with engine.begin() as conn:
+            row = conn.execute(text("SELECT hits FROM RateLimits WHERE rl_key = :k FOR UPDATE"), {"k": key}).fetchone()
+            if row and int(row[0]) >= limit:
+                over = True
+            else:
+                conn.execute(text("""
+                    INSERT INTO RateLimits (rl_key, last_call, hits) VALUES (:k, :n, 1)
+                    ON DUPLICATE KEY UPDATE last_call = :n, hits = hits + 1
+                """), {"k": key, "n": now})
+    except Exception as e:
+        print(f"⚠️ 每日總量檢查失敗，本次放行：{e}")
+        return
+    if over:
+        raise HTTPException(status_code=503, detail=message)
+
 # 允許前端讀取上傳的圖片
 app.mount("/uploads", StaticFiles(directory=os.path.join(current_dir, "uploads")), name="uploads")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
-    allow_credentials=True,
+    allow_origins=["*"],
+    # allow_credentials=True 搭配 allow_origins=["*"] 是已知的CORS誤設組合（瀏覽器實際上會把
+    # Access-Control-Allow-Origin動態回填成請求方網域，等於允許任何網站帶憑證跨源呼叫）。
+    # 這個API的登入機制是Bearer Token（Authorization header），不是cookie session，
+    # 前端從來沒有用到 credentials:'include'，所以關掉這個選項不影響任何現有功能。
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -86,7 +153,7 @@ class Post(BaseModel):
     replies: Optional[List[dict]] = []
 
 class LikeAction(BaseModel):
-    action: str
+    action: Literal["like", "unlike"]
 
 class PostEditData(BaseModel):
     content: str
@@ -123,6 +190,12 @@ async def periodic_sentiment_crawler():
 @app.on_event("startup")
 async def start_background_tasks():
     print("🚀 API 伺服器啟動中... (暫時關閉背景定時爬蟲以防記憶體不足當機)")
+    try:
+        ensure_auth_schema(engine)
+    except Exception as e:
+        print(f"❌ Email驗證/同意系統資料表建立失敗，註冊/登入相關功能可能異常：{e}")
+    if not EMAIL_ENABLED:
+        print("⚠️ 未設定 SMTP：不會強制Email驗證，忘記密碼功能停用。請在 .env 設定 SMTP_HOST/SMTP_USER/SMTP_PASSWORD")
     # 暫時註解掉自動執行，避免 Oracle 雲端 1GB RAM 被 CSV 灌爆當機
     # asyncio.create_task(periodic_sentiment_crawler())
 
@@ -218,11 +291,38 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
         expire = datetime.utcnow() + expires_delta
     else:
         expire = datetime.utcnow() + timedelta(minutes=15)
-    to_encode.update({"exp": expire})
+    to_encode.update({"exp": expire, "iat": int(time.time())})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
+# 登入憑證撤銷：JWT本身無法作廢，所以在Users.token_valid_after記一個時間點，
+# 簽發時間(iat)早於這個時間點的憑證一律視為失效。改密碼/重設密碼時把它設成「現在」，
+# 就能讓所有舊裝置的登入立刻(最多15秒內)失效。沒有iat的舊憑證視為iat=0，只在密碼被改過之後才會失效。
+_token_valid_after_cache = {}  # {email: (token_valid_after, 快取到期時間)}
+
+def _get_token_valid_after(email: str):
+    now = time.time()
+    cached = _token_valid_after_cache.get(email)
+    if cached and cached[1] > now:
+        return cached[0]
+    with engine.connect() as conn:
+        row = conn.execute(text("SELECT token_valid_after FROM Users WHERE email = :e"), {"e": email}).fetchone()
+    if row is None:
+        return None  # 帳號已不存在
+    value = int(row[0] or 0)
+    _token_valid_after_cache[email] = (value, now + 15)
+    return value
+
+def revoke_tokens_for(email: str) -> int:
+    """讓這個帳號目前所有已簽發的登入憑證失效，回傳新的有效起點"""
+    now = int(time.time())
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE Users SET token_valid_after = :t WHERE email = :e"), {"t": now, "e": email})
+    _token_valid_after_cache.pop(email, None)
+    return now
+
+def get_current_user_base(token: str = Depends(oauth2_scheme)):
+    """只驗證登入憑證本身(簽章、期限、是否被撤銷)，不檢查條款同意狀態。同意頁自己的API用這個"""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -235,53 +335,359 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
             raise credentials_exception
     except jwt.PyJWTError:
         raise credentials_exception
+
+    valid_after = _get_token_valid_after(email)
+    if valid_after is None or int(payload.get("iat", 0)) < valid_after:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="登入已失效，請重新登入",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return email
+
+# 通過同意檢查的使用者快取5分鐘（只快取「通過」，沒通過的每次都重查，
+# 這樣使用者在某個worker同意完之後，下一個請求不管落在哪個worker都會立刻通過）
+_consent_ok_cache = {}
+
+def get_current_user(email: str = Depends(get_current_user_base)):
+    """一般API用：登入憑證有效，而且已經同意目前最新版本的所有必要條款，否則回403 CONSENT_REQUIRED"""
+    now = time.time()
+    expires = _consent_ok_cache.get(email)
+    if expires and expires > now:
+        return email
+    try:
+        with engine.connect() as conn:
+            pending = pending_required_consents(conn, email)
+    except Exception as e:
+        print(f"⚠️ 檢查同意狀態失敗，本次放行：{e}")
+        return email
+    if pending:
+        raise HTTPException(status_code=403, detail={
+            "code": "CONSENT_REQUIRED",
+            "message": "條款已更新，請先閱讀並同意後再繼續使用",
+        })
+    _consent_ok_cache[email] = now + 300
+    return email
+
+class ConsentChoice(BaseModel):
+    code: str
+    version: int
+    granted: bool
 
 class UserRegister(BaseModel):
     email: str
     password: str
     name: Optional[str] = None
     phone: Optional[str] = None
+    consents: List[ConsentChoice] = []
 
 class UserLogin(BaseModel):
     email: str
     password: str
 
-@app.post("/api/auth/register")
-def register_user(user: UserRegister):
+# 只允許一般Email字元。原本的寫法 [^\s@]+ 連 < > " 都放行，別人的Email會被顯示在封鎖名單、檢舉頁，等於能塞HTML
+EMAIL_PATTERN = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
+
+def reject_markup(value, label: str):
+    """這類欄位(姓名、電話、標籤、檢舉原因)會被顯示給其他使用者，不需要任何HTML，直接拒絕 < > 字元。
+    前端輸出時也會跳脫，這裡是第二道防線，讓惡意內容一開始就存不進資料庫"""
+    if value is not None and ("<" in value or ">" in value):
+        raise HTTPException(status_code=400, detail=f"{label}不能包含 < 或 > 符號")
+
+ICON_PATTERN = re.compile(r"^fa-[a-z0-9-]+$")
+AVATAR_URL_PATTERN = re.compile(r"^(/uploads/[A-Za-z0-9_.\-]+|https?://[^\s\"'<>]+)$")
+
+# ------------------------------------------
+# Email 寄信 / 一次性驗證連結（註冊驗證、忘記密碼共用）
+# ------------------------------------------
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+def send_email(to_email: str, subject: str, html_body: str):
+    """寄信（由BackgroundTasks在背景執行，寄失敗只記log，不影響API回應）"""
+    try:
+        msg = MIMEText(html_body, "html", "utf-8")
+        msg["Subject"] = Header(subject, "utf-8")
+        msg["From"] = SMTP_FROM
+        msg["To"] = to_email
+        if SMTP_PORT == 465:
+            server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15)
+        else:
+            server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15)
+            server.starttls()
+        with server:
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_FROM, [to_email], msg.as_string())
+        print(f"📧 已寄出「{subject}」給 {to_email}")
+    except Exception as e:
+        print(f"❌ 寄信失敗（{to_email}）：{e}")
+
+def create_email_token(conn, email: str, purpose: str, ttl_minutes: int) -> str:
+    """產生一次性token；資料庫只存雜湊值，同一人同一用途重新申請時，舊的未使用token直接作廢"""
+    token = secrets.token_urlsafe(32)
+    conn.execute(text("DELETE FROM EmailTokens WHERE email = :e AND purpose = :p AND used_at IS NULL"),
+                 {"e": email, "p": purpose})
+    conn.execute(text("""
+        INSERT INTO EmailTokens (email, purpose, token_hash, expires_at)
+        VALUES (:e, :p, :h, :x)
+    """), {"e": email, "p": purpose, "h": _hash_token(token), "x": datetime.utcnow() + timedelta(minutes=ttl_minutes)})
+    return token
+
+def consume_email_token(conn, token: str, purpose: str) -> Optional[str]:
+    """驗證並用掉token，成功回傳對應的email；不存在、已用過、已過期一律回傳None"""
+    row = conn.execute(text(
+        "SELECT id, email, expires_at, used_at FROM EmailTokens WHERE token_hash = :h AND purpose = :p"
+    ), {"h": _hash_token(token), "p": purpose}).fetchone()
+    if not row or row[3] is not None or row[2] < datetime.utcnow():
+        return None
+    conn.execute(text("UPDATE EmailTokens SET used_at = :n WHERE id = :i"), {"n": datetime.utcnow(), "i": row[0]})
+    return row[1]
+
+def _email_layout(title: str, body_html: str) -> str:
+    return (f'<div style="font-family:Segoe UI,Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;'
+            f'background:#0f172a;color:#e2e8f0;border-radius:12px;">'
+            f'<h2 style="color:#38bdf8;margin-top:0;">{title}</h2>{body_html}'
+            f'<p style="font-size:12px;color:#64748b;margin-top:24px;">若這不是您本人的操作，請忽略這封信，不會有任何變更。</p></div>')
+
+EMAIL_QUOTA_MESSAGE = "今日系統寄信量已達上限，請明天再試，或聯繫客服協助"
+
+def queue_verification_email(background_tasks: BackgroundTasks, conn, email: str):
+    reserve_daily_quota("email", EMAIL_DAILY_LIMIT, EMAIL_QUOTA_MESSAGE)
+    token = create_email_token(conn, email, "verify", 60 * 24)
+    link = f"{PUBLIC_BASE_URL}/web/verify_email.html?token={token}"
+    html = _email_layout("驗證您的 Email", (
+        f'<p>歡迎加入 FutureWise AI！請點下方按鈕完成 Email 驗證（連結 24 小時內有效）：</p>'
+        f'<p><a href="{link}" style="display:inline-block;padding:10px 20px;background:#0ea5e9;color:#fff;'
+        f'border-radius:8px;text-decoration:none;font-weight:bold;">驗證我的 Email</a></p>'
+        f'<p style="font-size:12px;color:#94a3b8;word-break:break-all;">按鈕無法點擊時，請複製此網址貼到瀏覽器：<br>{link}</p>'))
+    background_tasks.add_task(send_email, email, "【FutureWise AI】請驗證您的 Email", html)
+
+def queue_reset_email(background_tasks: BackgroundTasks, conn, email: str):
+    reserve_daily_quota("email", EMAIL_DAILY_LIMIT, EMAIL_QUOTA_MESSAGE)
+    token = create_email_token(conn, email, "reset", 60)
+    link = f"{PUBLIC_BASE_URL}/web/reset_password.html?token={token}"
+    html = _email_layout("重設您的密碼", (
+        f'<p>我們收到重設密碼的申請，請點下方按鈕設定新密碼（連結 1 小時內有效，只能使用一次）：</p>'
+        f'<p><a href="{link}" style="display:inline-block;padding:10px 20px;background:#f59e0b;color:#fff;'
+        f'border-radius:8px;text-decoration:none;font-weight:bold;">重設密碼</a></p>'
+        f'<p style="font-size:12px;color:#94a3b8;word-break:break-all;">按鈕無法點擊時，請複製此網址貼到瀏覽器：<br>{link}</p>'))
+    background_tasks.add_task(send_email, email, "【FutureWise AI】重設密碼", html)
+
+# ------------------------------------------
+# 動態知情同意：條款內容存在資料庫(ConsentItems)，可以升版；
+# 使用者的同意/撤回只新增不修改(UserConsents)，保留完整稽核軌跡
+# ------------------------------------------
+def get_active_consent_items(conn) -> list:
+    """每個條款(code)取目前啟用中的最新版本"""
+    rows = conn.execute(text("""
+        SELECT c.code, c.version, c.title, c.summary, c.body, c.required
+        FROM ConsentItems c
+        JOIN (SELECT code, MAX(version) AS v FROM ConsentItems WHERE is_active = 1 GROUP BY code) m
+          ON m.code = c.code AND m.v = c.version
+        WHERE c.is_active = 1
+        ORDER BY c.required DESC, c.id ASC
+    """)).fetchall()
+    return [{"code": r[0], "version": r[1], "title": r[2], "summary": r[3], "body": r[4], "required": bool(r[5])}
+            for r in rows]
+
+def get_user_consent_map(conn, email: str) -> dict:
+    """{code: (最後一次表態的版本, 是否同意)}"""
+    rows = conn.execute(text("""
+        SELECT uc.code, uc.version, uc.granted FROM UserConsents uc
+        JOIN (SELECT code, MAX(id) AS mid FROM UserConsents WHERE user_email = :e GROUP BY code) m ON m.mid = uc.id
+    """), {"e": email}).fetchall()
+    return {r[0]: (r[1], bool(r[2])) for r in rows}
+
+def pending_required_consents(conn, email: str) -> list:
+    """還沒同意目前最新版本的「必要」條款（新版本上線後，舊使用者會出現在這裡）"""
+    current = get_user_consent_map(conn, email)
+    return [i for i in get_active_consent_items(conn)
+            if i["required"] and current.get(i["code"]) != (i["version"], True)]
+
+def record_consents(conn, email: str, items: list, choices: list, skip_unchanged: bool):
+    """依使用者的勾選寫入同意紀錄。choices裡的版本必須是目前最新版，避免拿舊版本條款來同意"""
+    by_code = {i["code"]: i for i in items}
+    current = get_user_consent_map(conn, email) if skip_unchanged else {}
+    for c in choices:
+        item = by_code.get(c.code)
+        if item is None:
+            raise HTTPException(status_code=400, detail=f"未知的條款：{c.code}")
+        if c.version != item["version"]:
+            raise HTTPException(status_code=409, detail=f"「{item['title']}」已更新為新版本，請重新整理頁面後再確認")
+        if item["required"] and not c.granted:
+            raise HTTPException(status_code=400, detail=f"「{item['title']}」為必要條款，無法撤回；如不同意請停止使用並申請刪除帳號")
+        if skip_unchanged and current.get(c.code) == (c.version, c.granted):
+            continue
+        conn.execute(text(
+            "INSERT INTO UserConsents (user_email, code, version, granted) VALUES (:e, :c, :v, :g)"
+        ), {"e": email, "c": c.code, "v": c.version, "g": 1 if c.granted else 0})
+
+@app.get("/api/consent/items")
+def list_consent_items():
+    """註冊頁用：目前生效中的所有條款（含全文）"""
     with engine.connect() as conn:
+        return {"items": get_active_consent_items(conn)}
+
+@app.get("/api/consent/me")
+def get_my_consents(current_user: str = Depends(get_current_user_base)):
+    with engine.connect() as conn:
+        items = get_active_consent_items(conn)
+        current = get_user_consent_map(conn, current_user)
+    result = []
+    for i in items:
+        state = current.get(i["code"])
+        accepted = state == (i["version"], True)
+        result.append({
+            **i,
+            "granted": accepted if state and state[0] == i["version"] else None,  # None=這個版本還沒表態
+            "needs_action": i["required"] and not accepted,
+        })
+    return {"items": result, "consent_required": any(r["needs_action"] for r in result)}
+
+class ConsentUpdate(BaseModel):
+    consents: List[ConsentChoice]
+
+@app.post("/api/consent/me")
+def update_my_consents(payload: ConsentUpdate, current_user: str = Depends(get_current_user_base)):
+    with engine.begin() as conn:
+        items = get_active_consent_items(conn)
+        record_consents(conn, current_user, items, payload.consents, skip_unchanged=True)
+    _consent_ok_cache.pop(current_user, None)  # 撤回選填授權不影響必要條款，但重新同意後要馬上重新評估
+    return {"status": "success"}
+
+@app.post("/api/auth/register")
+def register_user(user: UserRegister, background_tasks: BackgroundTasks):
+    # 後端也要驗證一次，不能只靠前端擋——前端的檢查繞得過去（例如直接呼叫API），
+    # 密碼長度門檻跟register.html前端的檢查保持一致
+    if not EMAIL_PATTERN.match(user.email):
+        raise HTTPException(status_code=400, detail="Email格式不正確")
+    if len(user.password) < 6:
+        raise HTTPException(status_code=400, detail="密碼長度至少需要6碼")
+    reject_markup(user.name, "姓名")
+    reject_markup(user.phone, "電話")
+
+    with engine.begin() as conn:
+        # 必要條款一定要在「目前最新版本」上勾選同意，後端強制檢查，不能只靠前端把按鈕鎖起來
+        items = get_active_consent_items(conn)
+        chosen = {c.code: c for c in user.consents}
+        for i in items:
+            c = chosen.get(i["code"])
+            if i["required"] and not (c and c.granted and c.version == i["version"]):
+                raise HTTPException(status_code=400, detail=f"請先閱讀並同意「{i['title']}」")
+
         res = conn.execute(text("SELECT id FROM Users WHERE email = :e"), {"e": user.email}).fetchone()
         if res:
             raise HTTPException(status_code=400, detail="Email already registered")
 
         hashed_pw = get_password_hash(user.password)
         conn.execute(
-            text("INSERT INTO Users (email, password_hash, name, phone) VALUES (:e, :p, :n, :ph)"),
-            {"e": user.email, "p": hashed_pw, "n": user.name, "ph": user.phone}
+            text("INSERT INTO Users (email, password_hash, name, phone, email_verified) VALUES (:e, :p, :n, :ph, :v)"),
+            {"e": user.email, "p": hashed_pw, "n": user.name, "ph": user.phone, "v": 0 if EMAIL_ENABLED else 1}
         )
-        conn.commit()
-    return {"status": "success", "message": "User registered successfully"}
+        # 沒勾的選填項目也記錄成「不同意」，之後才分得出是「拒絕」還是「沒被問過」
+        full_choices = [chosen.get(i["code"]) or ConsentChoice(code=i["code"], version=i["version"], granted=False)
+                        for i in items]
+        record_consents(conn, user.email, items, full_choices, skip_unchanged=False)
+
+        if EMAIL_ENABLED:
+            queue_verification_email(background_tasks, conn, user.email)
+
+    return {
+        "status": "success",
+        "verification_required": EMAIL_ENABLED,
+        "message": "註冊成功，請到信箱點擊驗證連結後再登入" if EMAIL_ENABLED else "註冊成功",
+    }
+
+class EmailOnly(BaseModel):
+    email: str
+
+class TokenOnly(BaseModel):
+    token: str
+
+class ResetPassword(BaseModel):
+    token: str
+    new_password: str
+
+@app.post("/api/auth/verify_email")
+def verify_email(payload: TokenOnly):
+    with engine.begin() as conn:
+        email = consume_email_token(conn, payload.token, "verify")
+        if not email:
+            raise HTTPException(status_code=400, detail="驗證連結無效或已過期，請回登入頁重新寄送驗證信")
+        conn.execute(text("UPDATE Users SET email_verified = 1 WHERE email = :e"), {"e": email})
+    return {"status": "success", "message": "Email 驗證完成，現在可以登入了"}
+
+@app.post("/api/auth/resend_verification")
+def resend_verification(payload: EmailOnly, background_tasks: BackgroundTasks):
+    if not EMAIL_ENABLED:
+        raise HTTPException(status_code=503, detail="系統尚未啟用寄信功能")
+    enforce_rate_limit(payload.email.strip().lower(), "resend_verification", 60)
+    with engine.begin() as conn:
+        row = conn.execute(text("SELECT email_verified FROM Users WHERE email = :e"), {"e": payload.email}).fetchone()
+        if row and not row[0]:
+            queue_verification_email(background_tasks, conn, payload.email)
+    # 不論帳號存在與否、是否已驗證，都回一樣的訊息，避免被拿來探測哪些Email註冊過
+    return {"status": "success", "message": "如果這個Email已註冊且尚未驗證，驗證信已重新寄出，請查看信箱（也請檢查垃圾郵件）"}
+
+@app.post("/api/auth/forgot_password")
+def forgot_password(payload: EmailOnly, background_tasks: BackgroundTasks):
+    if not EMAIL_ENABLED:
+        raise HTTPException(status_code=503, detail="系統尚未啟用寄信功能，請聯繫管理員協助重設密碼")
+    if not EMAIL_PATTERN.match(payload.email):
+        raise HTTPException(status_code=400, detail="Email格式不正確")
+    enforce_rate_limit(payload.email.strip().lower(), "forgot_password", 60)
+    with engine.begin() as conn:
+        row = conn.execute(text("SELECT id FROM Users WHERE email = :e"), {"e": payload.email}).fetchone()
+        if row:
+            queue_reset_email(background_tasks, conn, payload.email)
+    return {"status": "success", "message": "如果這個Email已註冊，重設密碼信已寄出，請查看信箱（也請檢查垃圾郵件）"}
+
+@app.post("/api/auth/reset_password")
+def reset_password(payload: ResetPassword):
+    if len(payload.new_password) < 6:
+        raise HTTPException(status_code=400, detail="密碼長度至少需要6碼")
+    with engine.begin() as conn:
+        email = consume_email_token(conn, payload.token, "reset")
+        if not email:
+            raise HTTPException(status_code=400, detail="重設連結無效或已過期，請重新申請")
+        # 能收到信、點到連結，也等於證明了這個Email是本人的，順便標記為已驗證
+        conn.execute(text("UPDATE Users SET password_hash = :p, email_verified = 1 WHERE email = :e"),
+                     {"p": get_password_hash(payload.new_password), "e": email})
+    revoke_tokens_for(email)  # 重設密碼的情境通常是懷疑帳號被盜，所以所有已登入的裝置一併登出
+    return {"status": "success", "message": "密碼已重設，請用新密碼登入"}
 
 @app.get("/api/user/me")
 def get_my_profile(current_user: str = Depends(get_current_user)):
     with engine.connect() as conn:
         res = conn.execute(
-            text("SELECT email, name, phone FROM Users WHERE email = :e"), {"e": current_user}
+            text("SELECT email, name, phone, avatar_url FROM Users WHERE email = :e"), {"e": current_user}
         ).fetchone()
         if not res:
             raise HTTPException(status_code=404, detail="User not found")
-        return {"email": res[0], "name": res[1], "phone": res[2]}
+        return {"email": res[0], "name": res[1], "phone": res[2], "avatar_url": res[3]}
 
 class UserProfileUpdate(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
+    avatar_url: Optional[str] = None
 
 @app.put("/api/user/me")
 def update_my_profile(payload: UserProfileUpdate, current_user: str = Depends(get_current_user)):
+    # 只更新請求裡真的有帶到的欄位，避免像之前那樣沒帶的欄位被無條件覆蓋成NULL
+    # （例如只想換大頭貼，結果連name/phone都被清空）
+    updates = payload.dict(exclude_unset=True, exclude_none=True)
+    if not updates:
+        return {"status": "success", "message": "Profile updated"}
+    reject_markup(updates.get("name"), "姓名")
+    reject_markup(updates.get("phone"), "電話")
+    if "avatar_url" in updates and not AVATAR_URL_PATTERN.match(updates["avatar_url"]):
+        raise HTTPException(status_code=400, detail="大頭貼網址格式不正確")
+
+    set_clause = ", ".join(f"{k} = :{k}" for k in updates)
     with engine.connect() as conn:
         conn.execute(
-            text("UPDATE Users SET name = :n, phone = :ph WHERE email = :e"),
-            {"n": payload.name, "ph": payload.phone, "e": current_user}
+            text(f"UPDATE Users SET {set_clause} WHERE email = :e"),
+            {**updates, "e": current_user}
         )
         conn.commit()
     return {"status": "success", "message": "Profile updated"}
@@ -291,7 +697,9 @@ class PasswordChange(BaseModel):
     new_password: str
 
 @app.put("/api/user/password")
-def change_password(payload: PasswordChange, current_user: str = Depends(get_current_user)):
+def change_password(payload: PasswordChange, background_tasks: BackgroundTasks, current_user: str = Depends(get_current_user)):
+    if len(payload.new_password) < 6:
+        raise HTTPException(status_code=400, detail="新密碼長度至少需要6碼")
     with engine.connect() as conn:
         res = conn.execute(
             text("SELECT password_hash FROM Users WHERE email = :e"), {"e": current_user}
@@ -305,7 +713,21 @@ def change_password(payload: PasswordChange, current_user: str = Depends(get_cur
             {"p": new_hash, "e": current_user}
         )
         conn.commit()
-    return {"status": "success", "message": "Password updated"}
+
+    # 改密碼後，所有其他裝置/舊的登入憑證立刻失效；目前這個裝置換發一張新的，前端要存起來，才不會被自己登出
+    revoke_tokens_for(current_user)
+    new_token = create_access_token(
+        data={"sub": current_user}, expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+
+    # 密碼被改掉時通知本人：帳號若被別人偷登入後改密碼，本人至少收得到提醒
+    if EMAIL_ENABLED:
+        html = _email_layout("您的密碼剛剛被變更", (
+            f'<p>您的 FutureWise AI 帳號密碼已於 {datetime.now().strftime("%Y-%m-%d %H:%M")}（伺服器時間）變更。</p>'
+            f'<p>如果是您本人操作，不需要做任何事。</p>'
+            f'<p style="color:#fca5a5;">如果不是您本人，請立即到登入頁點「忘記密碼？」重新設定密碼，並聯繫客服。</p>'))
+        background_tasks.add_task(send_email, current_user, "【FutureWise AI】您的密碼已被變更", html)
+    return {"status": "success", "message": "Password updated", "access_token": new_token, "token_type": "bearer"}
 
 # ==========================================
 # 我的收藏
@@ -406,6 +828,113 @@ def update_notification_settings(payload: NotificationSettingsUpdate, current_us
     return {"status": "success", "message": "Notification settings updated"}
 
 # ==========================================
+# 自選股買賣訊號通知（由 watchlist_alert_scanner.py 排程寫入）
+# ==========================================
+@app.get("/api/watchlist_alerts")
+def get_watchlist_alerts(limit: int = 50, current_user: str = Depends(get_current_user)):
+    limit = max(1, min(limit, 200))
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("""
+                SELECT id, ticker, stock_name, signal_type, signal_detail, trade_date, created_at, is_read, payload
+                FROM WatchlistAlerts WHERE user_email = :e
+                ORDER BY is_read ASC, created_at DESC LIMIT :limit
+            """),
+            {"e": current_user, "limit": limit}
+        ).fetchall()
+        unread_count = conn.execute(
+            text("SELECT COUNT(*) FROM WatchlistAlerts WHERE user_email = :e AND is_read = 0"),
+            {"e": current_user}
+        ).scalar()
+
+    def parse_payload(raw):
+        # payload 是排程寫入的卡片內容(JSON字串)；舊的通知沒有這欄，前端會退回顯示一行文字
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+
+    return {
+        "unread_count": unread_count or 0,
+        "alerts": [{
+            "id": r[0], "ticker": r[1], "stock_name": r[2], "signal_type": r[3],
+            "signal_detail": r[4], "trade_date": str(r[5]) if r[5] else None,
+            # 資料庫存的是伺服器(UTC)的時間、沒有時區標記，加上Z前端才會換算成使用者當地時間，「幾小時前」才不會差8小時
+            "created_at": (r[6].isoformat() + "Z") if r[6] else None, "is_read": bool(r[7]),
+            "payload": parse_payload(r[8]),
+        } for r in rows]
+    }
+
+@app.put("/api/watchlist_alerts/{alert_id}/read")
+def mark_watchlist_alert_read(alert_id: int, current_user: str = Depends(get_current_user)):
+    with engine.connect() as conn:
+        conn.execute(
+            text("UPDATE WatchlistAlerts SET is_read = 1 WHERE id = :id AND user_email = :e"),
+            {"id": alert_id, "e": current_user}
+        )
+        conn.commit()
+    return {"status": "success"}
+
+@app.put("/api/watchlist_alerts/read_all")
+def mark_all_watchlist_alerts_read(current_user: str = Depends(get_current_user)):
+    with engine.connect() as conn:
+        conn.execute(
+            text("UPDATE WatchlistAlerts SET is_read = 1 WHERE user_email = :e AND is_read = 0"),
+            {"e": current_user}
+        )
+        conn.commit()
+    return {"status": "success"}
+
+@app.get("/api/watchlist_alert_performance")
+def get_watchlist_alert_performance(current_user: str = Depends(get_current_user)):
+    """自選股買賣訊號成效追蹤：假設訊號觸發隔天開盤就照著做（買進訊號買進、賣出/偏空訊號視為賣出/不追），
+    浮動報酬(用最新收盤價對比進場價)，依 signal_type 分別統計，由 watchlist_alert_scanner.py 每日排程寫入"""
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT signal_type, entry_price,
+                       (SELECT close_price FROM StockPrice sp WHERE sp.ticker = w.ticker ORDER BY sp.trade_date DESC LIMIT 1) AS latest_close
+                FROM WatchlistAlerts w
+                WHERE user_email = :e AND entry_price IS NOT NULL
+            """), {"e": current_user}).fetchall()
+            pending_count = conn.execute(
+                text("SELECT COUNT(*) FROM WatchlistAlerts WHERE user_email = :e AND entry_price IS NULL"),
+                {"e": current_user}
+            ).scalar()
+
+        # 買進類訊號(ai_bullish/pattern_buy)：股價上漲才算猜對；
+        # 偏空/賣出類訊號(ai_bearish/pattern_sell)：股價下跌才算猜對(意思是「提醒你賣掉/避開」有沒有猜中方向)
+        BEARISH_TYPES = {"ai_bearish", "pattern_sell"}
+
+        stats = {}
+        for signal_type, entry_price, latest_close in rows:
+            if entry_price is None or latest_close is None or float(entry_price) == 0:
+                continue
+            ret = (float(latest_close) - float(entry_price)) / float(entry_price) * 100
+            is_bearish_signal = signal_type in BEARISH_TYPES
+            s = stats.setdefault(signal_type, {"returns": [], "wins": 0, "count": 0})
+            s["returns"].append(ret)
+            s["count"] += 1
+            correct = (ret < 0) if is_bearish_signal else (ret > 0)
+            if correct:
+                s["wins"] += 1
+
+        result = {
+            signal_type: {
+                "count": s["count"],
+                "avg_return": round(sum(s["returns"]) / s["count"], 2) if s["count"] else 0,
+                "hit_rate": round(s["wins"] / s["count"] * 100, 2) if s["count"] else 0,
+            }
+            for signal_type, s in stats.items()
+        }
+
+        return {"status": "success", "stats": result, "pending_count": pending_count or 0}
+    except Exception as e:
+        return {"status": "error", "message": f"讀取成效失敗: {str(e)}"}
+
+# ==========================================
 # 客服工單
 # ==========================================
 class SupportTicketCreate(BaseModel):
@@ -449,18 +978,31 @@ def get_reading_progress(current_user: str = Depends(get_current_user)):
 @app.post("/api/auth/login")
 def login_user(user: UserLogin):
     with engine.connect() as conn:
-        res = conn.execute(text("SELECT password_hash FROM Users WHERE email = :e"), {"e": user.email}).fetchone()
+        res = conn.execute(text("SELECT password_hash, email_verified FROM Users WHERE email = :e"), {"e": user.email}).fetchone()
         if not res:
             raise HTTPException(status_code=401, detail="Invalid credentials")
         hashed_pw = res[0]
         if not verify_password(user.password, hashed_pw):
             raise HTTPException(status_code=401, detail="Invalid credentials")
-            
+
+        # 密碼確認正確之後才提示「尚未驗證」，避免被拿來探測某個Email有沒有註冊過
+        if EMAIL_ENABLED and not res[1]:
+            raise HTTPException(status_code=403, detail={
+                "code": "EMAIL_NOT_VERIFIED",
+                "message": "Email 尚未驗證，請先到信箱點擊驗證連結",
+            })
+
+        try:
+            consent_required = bool(pending_required_consents(conn, user.email))
+        except Exception as e:
+            print(f"⚠️ 檢查同意狀態失敗，略過：{e}")
+            consent_required = False
+
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
             data={"sub": user.email}, expires_delta=access_token_expires
         )
-        return {"access_token": access_token, "token_type": "bearer"}
+        return {"access_token": access_token, "token_type": "bearer", "consent_required": consent_required}
 
 # ==========================================
 # API 路由區塊
@@ -501,22 +1043,16 @@ async def gemini_chat(data: GeminiQuery, current_user: str = Depends(get_current
                 f"- 籌碼結構：內部人持股 = {insider:.2f}%, 機構持股 = {inst:.2f}%\n"
             )
 
-            # --- 新增：抓取最新新聞標題放入提示詞 ---
-            import yfinance as yf
+            # --- 抓取最新新聞標題放入提示詞：改用跟情緒分析(sentiment_crawler.py)同一套
+            # Yahoo股市個股新聞頁爬蟲，比原本yfinance內建的.news屬性對中小型股的覆蓋率更可靠，
+            # 兩邊用同一個資料來源，「有沒有新聞」的答案才會一致 ---
+            from sentiment_crawler import fetch_yahoo_news
             try:
-                tk_news = yf.Ticker(f"{ticker}.TW")
-                news_list = tk_news.news
-                if not news_list:
-                    tk_news = yf.Ticker(f"{ticker}.TWO")
-                    news_list = tk_news.news
-                    
-                if news_list:
-                    context_str += "- 近期最新新聞摘要：\n"
-                    for n in news_list[:3]:  # 取最新3筆新聞
-                        title = n.get("title", "")
-                        publisher = n.get("publisher", "")
-                        if title:
-                            context_str += f"  * {title} (來源: {publisher})\n"
+                news_titles = await asyncio.to_thread(fetch_yahoo_news, ticker)
+                if news_titles:
+                    context_str += "- 近期最新新聞摘要（來源：Yahoo股市）：\n"
+                    for t in news_titles[:3]:  # 取最新3筆新聞
+                        context_str += f"  * {t}\n"
             except Exception as ne:
                 pass # 若新聞抓取失敗則忽略
             # -----------------------------------
@@ -526,12 +1062,12 @@ async def gemini_chat(data: GeminiQuery, current_user: str = Depends(get_current
         # 2. 抓取 XGBoost AI 預測數據
         try:
             if engine.dialect.name == 'mssql':
-                query = f"SELECT TOP 2 * FROM StockPrice WHERE ticker = '{ticker}' ORDER BY trade_date DESC"
+                query = "SELECT TOP 2 * FROM StockPrice WHERE ticker = :ticker ORDER BY trade_date DESC"
             else:
-                query = f"SELECT * FROM StockPrice WHERE ticker = '{ticker}' ORDER BY trade_date DESC LIMIT 2"
-            
+                query = "SELECT * FROM StockPrice WHERE ticker = :ticker ORDER BY trade_date DESC LIMIT 2"
+
             with engine.connect() as conn:
-                df = pd.read_sql(text(query), conn)
+                df = pd.read_sql(text(query), conn, params={"ticker": ticker})
             
             if not df.empty:
                 df = df.sort_values("trade_date")
@@ -590,7 +1126,26 @@ async def gemini_chat(data: GeminiQuery, current_user: str = Depends(get_current
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-LEADERBOARD_CACHE = {"data": [], "timestamp": 0}
+LEADERBOARD_CACHE_FILE = os.path.join(current_dir, "leaderboard_cache.json")
+LEADERBOARD_CACHE_TTL = 3600
+# 用檔案存快取，而不是 Python 記憶體變數：伺服器是多 worker process 模式，
+# 記憶體變數各個 process 互不相通（同一套做法跟 TREND_7D_CACHE 一樣）。
+
+def _load_leaderboard_cache():
+    import json
+    try:
+        with open(LEADERBOARD_CACHE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"data": [], "timestamp": 0}
+
+def _save_leaderboard_cache(cache):
+    import json
+    try:
+        with open(LEADERBOARD_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(cache, f)
+    except Exception as e:
+        print(f"⚠️ 寫入 leaderboard 快取失敗：{e}")
 
 @app.get("/api/leaderboard")
 def get_leaderboard(limit: int = 5):
@@ -599,12 +1154,13 @@ def get_leaderboard(limit: int = 5):
     """
     import numpy as np
     import time
-    
+
     now = time.time()
+    leaderboard_cache = _load_leaderboard_cache()
     # 如果快取未過期 (1小時)，直接秒回傳
-    if now - LEADERBOARD_CACHE.get("timestamp", 0) < 3600 and LEADERBOARD_CACHE.get("data"):
-        return {"top_tickers": LEADERBOARD_CACHE["data"][:limit]}
-        
+    if now - leaderboard_cache.get("timestamp", 0) < LEADERBOARD_CACHE_TTL and leaderboard_cache.get("data"):
+        return {"top_tickers": leaderboard_cache["data"][:limit]}
+
     try:
         csv_path = os.path.join(current_dir, "股票清單_Cloud.csv")
         df_raw = pd.read_csv(csv_path, dtype={'股票代碼': str})
@@ -651,20 +1207,20 @@ def get_leaderboard(limit: int = 5):
             
         # 排序並存入快取 (存前 100 名)
         top_list = last_row_df.sort_values("prob", ascending=False)["股票代碼"].head(100).tolist()
-        
-        LEADERBOARD_CACHE["data"] = top_list
-        LEADERBOARD_CACHE["timestamp"] = now
-        
+
+        _save_leaderboard_cache({"data": top_list, "timestamp": now})
+
         return {"top_tickers": top_list[:limit]}
     except Exception as e:
         print(f"❌ Leaderboard 計算錯誤: {e}")
         # 如果出錯但有舊快取，加減回傳，避免前端當掉
-        if LEADERBOARD_CACHE.get("data"):
-             return {"top_tickers": LEADERBOARD_CACHE["data"][:limit]}
+        if leaderboard_cache.get("data"):
+             return {"top_tickers": leaderboard_cache["data"][:limit]}
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/sentiment/run_crawler/{ticker}")
 def trigger_sentiment_crawler(ticker: str, current_user: str = Depends(get_current_user)):
+    enforce_rate_limit(current_user, "sentiment_crawler", 30)
     print(f"📡 收到啟動輿情爬蟲請求 ({ticker})...")
     try:
         # 直接呼叫我們新建的 crawler function，並傳入要單獨爬取的股票代碼
@@ -719,12 +1275,12 @@ def get_stock_data(ticker: str, limit: int = 200):
     print(f"📡 收到全數據請求：股票代號 {ticker}")
     try:
         if engine.dialect.name == 'mssql':
-            query = f"SELECT TOP {limit} * FROM StockPrice WHERE ticker = '{ticker}' ORDER BY trade_date DESC"
+            query = "SELECT TOP (:limit) * FROM StockPrice WHERE ticker = :ticker ORDER BY trade_date DESC"
         else:
-            query = f"SELECT * FROM StockPrice WHERE ticker = '{ticker}' ORDER BY trade_date DESC LIMIT {limit}"
-        
+            query = "SELECT * FROM StockPrice WHERE ticker = :ticker ORDER BY trade_date DESC LIMIT :limit"
+
         with engine.connect() as conn:
-            df = pd.read_sql(text(query), conn)
+            df = pd.read_sql(text(query), conn, params={"ticker": ticker, "limit": limit})
         
         if df.empty:
             raise HTTPException(status_code=404, detail="資料庫中找不到該股票代碼")
@@ -748,8 +1304,26 @@ def get_stock_data(ticker: str, limit: int = 200):
         print(f"❌ 錯誤：{e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-STOCK_INFO_CACHE = {}
+STOCK_INFO_CACHE_FILE = os.path.join(current_dir, "stock_info_cache.json")
 CACHE_TTL = 3600  # 快取 1 小時
+# 用檔案存快取，而不是 Python 記憶體變數：伺服器是多 worker process 模式，
+# 記憶體變數各個 process 互不相通（同一套做法跟 TREND_7D_CACHE 一樣）。
+
+def _load_stock_info_cache():
+    import json
+    try:
+        with open(STOCK_INFO_CACHE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _save_stock_info_cache(cache):
+    import json
+    try:
+        with open(STOCK_INFO_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(cache, f)
+    except Exception as e:
+        print(f"⚠️ 寫入 stock_info 快取失敗：{e}")
 
 INDUSTRY_TRANSLATION = {
     "Semiconductors": "半導體",
@@ -787,13 +1361,13 @@ def fetch_yf_info(ticker: str):
 async def get_stock_fundamental_info(ticker: str):
     print(f"📊 收到個股基本面請求：股票代號 {ticker}")
     now = time.time()
-    
+    stock_info_cache = _load_stock_info_cache()
+
     # 檢查快取
-    if ticker in STOCK_INFO_CACHE:
-        cached_data, timestamp = STOCK_INFO_CACHE[ticker]
-        if now - timestamp < CACHE_TTL:
-            return {"status": "success", "data": cached_data}
-            
+    cached = stock_info_cache.get(ticker)
+    if cached and now - cached["ts"] < CACHE_TTL:
+        return {"status": "success", "data": cached["data"]}
+
     try:
         info = await asyncio.to_thread(fetch_yf_info, ticker)
         
@@ -850,13 +1424,15 @@ async def get_stock_fundamental_info(ticker: str):
             "heldPercentInsiders":     info.get("heldPercentInsiders", 0),
         }
         
-        STOCK_INFO_CACHE[ticker] = (data, now)
+        fresh_cache = _load_stock_info_cache()
+        fresh_cache[ticker] = {"data": data, "ts": now}
+        _save_stock_info_cache(fresh_cache)
         return {"status": "success", "data": data}
-        
+
     except Exception as e:
         print(f"❌ Yahoo Finance 請求錯誤：{e}")
-        if ticker in STOCK_INFO_CACHE:
-             return {"status": "success", "data": STOCK_INFO_CACHE[ticker][0]}
+        if ticker in stock_info_cache:
+             return {"status": "success", "data": stock_info_cache[ticker]["data"]}
         
         # 建立防呆預設資料，防止因為 yfinance 遭雲端 IP 擋掉而導致整個 API 報 500 錯誤
         default_data = {
@@ -907,12 +1483,12 @@ def get_ai_prediction(ticker: str, current_user: str = Depends(get_current_user)
     try:
         # 抓取最近 2 天來做明日預測與斜率計算
         if engine.dialect.name == 'mssql':
-            query = f"SELECT TOP 2 * FROM StockPrice WHERE ticker = '{ticker}' ORDER BY trade_date DESC"
+            query = "SELECT TOP 2 * FROM StockPrice WHERE ticker = :ticker ORDER BY trade_date DESC"
         else:
-            query = f"SELECT * FROM StockPrice WHERE ticker = '{ticker}' ORDER BY trade_date DESC LIMIT 2"
-        
+            query = "SELECT * FROM StockPrice WHERE ticker = :ticker ORDER BY trade_date DESC LIMIT 2"
+
         with engine.connect() as conn:
-            df = pd.read_sql(text(query), conn)
+            df = pd.read_sql(text(query), conn, params={"ticker": ticker})
 
         if df.empty:
             raise HTTPException(status_code=404, detail="無資料可供預測")
@@ -1019,6 +1595,8 @@ def get_ai_prediction(ticker: str, current_user: str = Depends(get_current_user)
             "message": final_reasons
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ 預測錯誤：{e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1045,7 +1623,7 @@ def _save_trend_7d_cache(cache):
         print(f"⚠️ 寫入 trend_7days 快取失敗：{e}")
 
 @app.get("/api/trend_7days/{ticker}")
-def get_trend_7days(ticker: str):
+def get_trend_7days(ticker: str, current_user: str = Depends(get_current_user)):
     cache = _load_trend_7d_cache()
     cached = cache.get(ticker)
     if cached and (time.time() - cached["ts"] < TREND_7D_CACHE_TTL):
@@ -1061,12 +1639,12 @@ def get_trend_7days(ticker: str):
         # 取得該股票最近的 60 天歷史資料供 AutoGluon 做時序背景推演
         # 改從資料庫讀取，確保預測基準點與今日同步 (捨棄舊 CSV)
         if engine.dialect.name == 'mssql':
-            query = f"SELECT TOP 60 * FROM StockPrice WHERE ticker = '{ticker}' ORDER BY trade_date DESC"
+            query = "SELECT TOP 60 * FROM StockPrice WHERE ticker = :ticker ORDER BY trade_date DESC"
         else:
-            query = f"SELECT * FROM StockPrice WHERE ticker = '{ticker}' ORDER BY trade_date DESC LIMIT 60"
-            
+            query = "SELECT * FROM StockPrice WHERE ticker = :ticker ORDER BY trade_date DESC LIMIT 60"
+
         with engine.connect() as conn:
-            df = pd.read_sql(text(query), conn)
+            df = pd.read_sql(text(query), conn, params={"ticker": ticker})
             
         if df.empty:
             raise HTTPException(status_code=404, detail="查無此股票歷史紀錄")
@@ -1074,23 +1652,37 @@ def get_trend_7days(ticker: str):
         # 為了時間序列，必須排序讓舊的日期在上面
         df = df.sort_values("trade_date")
         
-        # 將資料庫英文欄位轉為模型訓練時的中文特徵
+        # 將資料庫英文欄位轉為模型訓練時的中文特徵（要跟 train_autogluon_7days.py 的欄位完全對齊，
+        # 不然訓練好的模型在推論時看不到它認得的輔助欄位，會直接出錯）
         df = df.rename(columns={
             'ticker': '股票代碼',
             'trade_date': '交易日期',
             'close_price': '收盤價',
-            'volume': '成交量'
+            'volume': '成交量',
+            'Foreign_Buy': '外資買賣超',
+            'Trust_Buy': '投信買賣超',
+            'Dealer_Buy': '自營商買賣超',
+            'Vol_Ratio': '量能比',
+            'KD_K': 'K值',
+            'KD_D': 'D值',
+            'Bias_5': '5日乖離',
+            'Change_1D': '漲跌幅_1日',
+            'Market_Return': '大盤漲跌幅',
+            'TWD_Exchange': '台幣匯率',
+            'SOX_Return': '費半漲跌',
         })
-        
-        if '外資買賣超' not in df.columns:
-            df['外資買賣超'] = 0.0
-            
+
         # 轉換為 AutoGluon 需要的指定欄位結構
         df['交易日期'] = pd.to_datetime(df['交易日期'])
-            
-        keep_cols = ['股票代碼', '交易日期', '收盤價', '成交量', '外資買賣超']
+
+        keep_cols = ['股票代碼', '交易日期', '收盤價', '成交量', '外資買賣超',
+                     '投信買賣超', '自營商買賣超', '量能比', 'K值', 'D值', 'RSI_14',
+                     '5日乖離', '漲跌幅_1日', '大盤漲跌幅', '台幣匯率', '費半漲跌']
         keep_cols_exist = [c for c in keep_cols if c in df.columns]
         df = df[keep_cols_exist]
+        for col in keep_cols:
+            if col not in df.columns:
+                df[col] = 0.0
         
         ts_data = TimeSeriesDataFrame.from_data_frame(
             df,
@@ -1122,6 +1714,8 @@ def get_trend_7days(ticker: str):
         _save_trend_7d_cache(fresh_cache)
         return response
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ AutoGluon 預測遭遇錯誤：{e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1136,12 +1730,12 @@ def get_institutional_data(ticker: str, limit: int = 30):
     print(f"\n📡 [API] 收到三大法人數據請求 ({ticker})...")
     try:
         if engine.dialect.name == 'mssql':
-            query = f"SELECT TOP {limit} * FROM StockPrice WHERE ticker = '{ticker}' ORDER BY trade_date DESC"
+            query = "SELECT TOP (:limit) * FROM StockPrice WHERE ticker = :ticker ORDER BY trade_date DESC"
         else:
-            query = f"SELECT * FROM StockPrice WHERE ticker = '{ticker}' ORDER BY trade_date DESC LIMIT {limit}"
-            
+            query = "SELECT * FROM StockPrice WHERE ticker = :ticker ORDER BY trade_date DESC LIMIT :limit"
+
         with engine.connect() as conn:
-            df = pd.read_sql(text(query), conn)
+            df = pd.read_sql(text(query), conn, params={"ticker": ticker, "limit": limit})
         
         if df.empty:
             print("⚠️ [API] 資料庫中找不到 TSE 的資料")
@@ -1189,9 +1783,11 @@ def get_institutional_data(ticker: str, limit: int = 30):
                 "dealer": d_val,
                 "total": f_val + t_val + d_val
             })
-            
+
         return {"count": len(result), "data": result}
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ [API] 法人資料讀取錯誤：{e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1226,95 +1822,56 @@ def get_material_news(ticker: str, limit: int = 20):
         raise HTTPException(status_code=500, detail=str(e))
 
 # ==========================================
-# Gemini AI 深度解析 API
-# ==========================================
-@app.get("/api/gemini_analysis/{ticker}")
-async def get_gemini_analysis(ticker: str, current_user: str = Depends(get_current_user)):
-    print(f"🤖 收到 Gemini 深度解析請求：股票代號 {ticker}")
-    if not GEMINI_API_KEY or GEMINI_API_KEY == "在這裡填入您的金鑰":
-        raise HTTPException(status_code=503, detail="尚未設定 Gemini API Key。請在 config.py 中填入您的金鑰。")
-        
-    try:
-        # 從資料庫撈取最新一日的資料
-        if engine.dialect.name == 'mssql':
-            query = f"SELECT TOP 1 * FROM StockPrice WHERE ticker = '{ticker}' ORDER BY trade_date DESC"
-        else:
-            query = f"SELECT * FROM StockPrice WHERE ticker = '{ticker}' ORDER BY trade_date DESC LIMIT 1"
-            
-        with engine.connect() as conn:
-            df = pd.read_sql(text(query), conn)
-            
-        if df.empty:
-            raise HTTPException(status_code=404, detail="查無此股票資料")
-            
-        latest_data = df.iloc[0]
-        
-        # 準備送給 Gemini 的 Prompt
-        prompt = f"""
-        你是一位專業的股市分析師，請針對台灣股市的股票代碼 {ticker} (名稱: {latest_data.get('stock_name', '未知')}) 提供一份專業且人性化的深度解析報告。
-        
-        以下是該股票最新的盤後數據：
-        - 交易日期：{latest_data.get('trade_date', '未知')}
-        - 收盤價：{latest_data.get('close_price', '未知')}
-        - 漲跌幅：{latest_data.get('Change_1D', 0) * 100:.2f}%
-        - 成交量：{latest_data.get('volume', '未知')}
-        - 5日均線：{latest_data.get('MA_5', '未知')}
-        - 20日均線：{latest_data.get('MA_20', '未知')}
-        - 外資買賣超：{latest_data.get('Foreign_Buy', 0)} 張
-        - 投信買賣超：{latest_data.get('Trust_Buy', 0)} 張
-        - 自營商買賣超：{latest_data.get('Dealer_Buy', 0)} 張
-        - RSI (14)：{latest_data.get('RSI_14', '未知')}
-        - MACD 柱狀體：{latest_data.get('MACD_Hist', '未知')}
-        
-        請根據以上數據，使用繁體中文，並以 Markdown 格式輸出報告。報告必須包含以下三個部分：
-        1. **總評摘要** (簡短總結目前的趨勢是多頭、空頭還是盤整)
-        2. **技術面解析** (分析價格與均線的關係、RSI是否過熱/超賣、MACD訊號等)
-        3. **籌碼面解析** (分析三大法人的動向對後市的影響)
-        
-        語氣請專業且客觀，並給出一個適當的短線操作建議(例如：逢低佈局、觀望、注意追高風險等)。
-        """
-        
-        # 呼叫 Gemini
-        model = genai.GenerativeModel('gemini-1.5-flash') # 使用 1.5-flash 版本，速度快且便宜
-        # 因為這可能會花費幾秒鐘，使用 asyncio 將其放到執行緒池
-        response = await asyncio.to_thread(model.generate_content, prompt)
-        
-        return {"status": "success", "analysis": response.text}
-        
-    except Exception as e:
-        print(f"❌ Gemini API 發生錯誤: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ==========================================
 # 社群論壇 API 區塊
 # ==========================================
 # ==========================================
 # 社群論壇 API 區塊 (SQL 版)
 # ==========================================
 @app.get("/api/posts", response_model=List[Post])
-def get_posts():
+def get_posts(limit: int = 50, offset: int = 0, sort: str = "newest"):
+    """社群貼文列表（公開）。分頁：limit(1~100，預設50)、offset；sort=newest(最新) 或 popular(最多讚)。
+    回覆只撈「這一頁貼文」的，不再一次撈全部貼文跟全部回覆"""
+    return _query_posts(limit, offset, sort)
+
+@app.get("/api/my_posts", response_model=List[Post])
+def get_my_posts(limit: int = 100, offset: int = 0, current_user: str = Depends(get_current_user)):
+    """只回傳登入者自己的貼文（「我的貼文」頁用）。不能沿用公開列表再由前端篩選，
+    公開列表分頁後只有最新幾十筆，比較舊的自己的貼文會看不到"""
+    return _query_posts(limit, offset, "newest", owner=current_user)
+
+def _query_posts(limit: int, offset: int, sort: str, owner: Optional[str] = None):
+    limit = max(1, min(limit, 100))
+    offset = max(0, offset)
+    # 排序方式只從白名單挑，不直接把使用者傳入的字串放進SQL
+    order_by = "likes DESC, created_at DESC, id DESC" if sort == "popular" else "created_at DESC, id DESC"
     try:
-        user_col = "[user]" if "mssql" in MYSQL_CONN_STR.lower() else "user"
-        query_posts = f"SELECT id, {user_col} as [user], user_email, icon, created_at, sentiment, tag, content, likes, comments FROM Posts ORDER BY created_at DESC"
-        # MSSQL alias 語法稍微不同，修正為更通用的方式
-        if "mysql" in MYSQL_CONN_STR.lower():
-            query_posts = "SELECT id, user, user_email, icon, created_at, sentiment, tag, content, likes, comments FROM Posts ORDER BY created_at DESC"
-        
+        is_mssql = "mssql" in MYSQL_CONN_STR.lower()
+        user_col = "[user]" if is_mssql else "user"
+        page_clause = "OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY" if is_mssql else "LIMIT :limit OFFSET :offset"
+        where_clause = "WHERE user_email = :owner" if owner else ""
+        query_params = {"limit": limit, "offset": offset}
+        if owner:
+            query_params["owner"] = owner
+        query_posts = (f"SELECT id, {user_col} AS [user], user_email, icon, created_at, sentiment, tag, content, likes, comments "
+                       f"FROM Posts {where_clause} ORDER BY {order_by} {page_clause}")
+        if not is_mssql:
+            query_posts = (f"SELECT id, user, user_email, icon, created_at, sentiment, tag, content, likes, comments "
+                           f"FROM Posts {where_clause} ORDER BY {order_by} {page_clause}")
+
         with engine.connect() as conn:
-            df_posts = pd.read_sql(text(query_posts), conn)
-            
-            # 抓取所有回覆
-            query_replies = "SELECT id, post_id, author, content, created_at FROM Replies ORDER BY created_at ASC"
-            df_replies = pd.read_sql(text(query_replies), conn)
+            df_posts = pd.read_sql(text(query_posts), conn, params=query_params)
+            if df_posts.empty:
+                return []
+            reply_query = text(
+                "SELECT id, post_id, author, content, created_at FROM Replies WHERE post_id IN :ids ORDER BY created_at ASC"
+            ).bindparams(bindparam("ids", expanding=True))
+            df_replies = pd.read_sql(reply_query, conn, params={"ids": [int(i) for i in df_posts["id"].tolist()]})
 
         result = []
         for _, row in df_posts.iterrows():
             post_id = row['id']
-            # 過濾該貼文的回覆
             post_replies = df_replies[df_replies['post_id'] == post_id].to_dict(orient='records')
-            
-            # 格式化回覆中的時間
+
             for r in post_replies:
                 if isinstance(r['created_at'], (datetime, date)):
                     r['time'] = r['created_at'].strftime("%Y-%m-%d %H:%M")
@@ -1341,6 +1898,8 @@ def get_posts():
 
 @app.post("/api/posts")
 def create_post(post: Post, current_user: str = Depends(get_current_user)):
+    reject_markup(post.tag, "標籤")
+    post.icon = post.icon if ICON_PATTERN.match(post.icon or "") else "fa-user"
     try:
         user_col = "[user]" if "mssql" in MYSQL_CONN_STR.lower() else "user"
         with engine.begin() as conn:
@@ -1370,15 +1929,29 @@ def toggle_like(post_id: int, action: LikeAction, current_user: str = Depends(ge
     try:
         with engine.begin() as conn:
             if action.action == "like":
-                conn.execute(text("UPDATE Posts SET likes = likes + 1 WHERE id = :id1"), {"id1": post_id})
-            elif action.action == "unlike":
-                conn.execute(text("UPDATE Posts SET likes = CASE WHEN likes > 0 THEN likes - 1 ELSE 0 END WHERE id = :id2"), {"id2": post_id})
-            
+                # INSERT IGNORE 靠 PostLikes 的 PRIMARY KEY(user_email, post_id) 擋掉重複按讚，
+                # 只有這次真的新增了一筆紀錄(rowcount>0)才加計數，避免同一人狂打這支API無限刷讚數
+                result = conn.execute(
+                    text("INSERT IGNORE INTO PostLikes (user_email, post_id) VALUES (:e, :id)"),
+                    {"e": current_user, "id": post_id}
+                )
+                if result.rowcount > 0:
+                    conn.execute(text("UPDATE Posts SET likes = likes + 1 WHERE id = :id1"), {"id1": post_id})
+            else:  # unlike
+                result = conn.execute(
+                    text("DELETE FROM PostLikes WHERE user_email = :e AND post_id = :id"),
+                    {"e": current_user, "id": post_id}
+                )
+                if result.rowcount > 0:
+                    conn.execute(text("UPDATE Posts SET likes = CASE WHEN likes > 0 THEN likes - 1 ELSE 0 END WHERE id = :id2"), {"id2": post_id})
+
             # 取得最新按讚數
             res = conn.execute(text("SELECT likes FROM Posts WHERE id = :id3"), {"id3": post_id}).fetchone()
             if res:
                 return {"status": "success", "likes": res[0]}
         raise HTTPException(status_code=404, detail="找不到該留言")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1445,6 +2018,7 @@ def add_reply(post_id: int, reply: ReplyData, current_user: str = Depends(get_cu
 
 MAX_UPLOAD_SIZE = 5 * 1024 * 1024  # 5MB
 ALLOWED_UPLOAD_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+UPLOAD_CONTENT_TYPE_EXT = {"image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp"}
 
 @app.post("/api/upload")
 async def upload_image(file: UploadFile = File(...), current_user: str = Depends(get_current_user)):
@@ -1457,9 +2031,10 @@ async def upload_image(file: UploadFile = File(...), current_user: str = Depends
         if len(contents) > MAX_UPLOAD_SIZE:
             raise HTTPException(status_code=400, detail="圖片大小不能超過 5MB")
 
-        # 生成唯一檔名
+        # 生成唯一檔名：副檔名完全由已驗證過的 content_type 決定，不採用使用者送來的原始檔名，
+        # 避免有人用 "a.png/../../../evil" 這種檔名做路徑穿越、或偽裝成圖片實際存成 .html/.svg 造成儲存型XSS
         import uuid
-        file_ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
+        file_ext = UPLOAD_CONTENT_TYPE_EXT[file.content_type]
         file_name = f"{uuid.uuid4().hex}.{file_ext}"
         file_path = os.path.join(current_dir, "uploads", file_name)
 
@@ -1479,8 +2054,15 @@ async def upload_image(file: UploadFile = File(...), current_user: str = Depends
 class ReportCreate(BaseModel):
     reason: str
 
+def check_report_reason(reason: str):
+    # 檢舉原因會顯示在管理員的檢舉頁，所以不能夾帶HTML，也限制長度
+    reject_markup(reason, "檢舉原因")
+    if len(reason) > 500:
+        raise HTTPException(status_code=400, detail="檢舉原因最多500字")
+
 @app.post("/api/posts/{post_id}/report")
 def report_post(post_id: int, payload: ReportCreate, current_user: str = Depends(get_current_user)):
+    check_report_reason(payload.reason)
     with engine.connect() as conn:
         conn.execute(
             text("INSERT INTO Reports (reporter_email, target_type, target_id, reason) VALUES (:e, 'post', :id, :r)"),
@@ -1491,6 +2073,7 @@ def report_post(post_id: int, payload: ReportCreate, current_user: str = Depends
 
 @app.post("/api/replies/{reply_id}/report")
 def report_reply(reply_id: int, payload: ReportCreate, current_user: str = Depends(get_current_user)):
+    check_report_reason(payload.reason)
     with engine.connect() as conn:
         conn.execute(
             text("INSERT INTO Reports (reporter_email, target_type, target_id, reason) VALUES (:e, 'reply', :id, :r)"),
@@ -1498,6 +2081,54 @@ def report_reply(reply_id: int, payload: ReportCreate, current_user: str = Depen
         )
         conn.commit()
     return {"status": "success", "message": "已收到您的檢舉，我們會盡快處理"}
+
+async def get_current_admin(current_user: str = Depends(get_current_user)):
+    with engine.connect() as conn:
+        res = conn.execute(
+            text("SELECT is_admin FROM Users WHERE email = :e"), {"e": current_user}
+        ).fetchone()
+    if not res or not res[0]:
+        raise HTTPException(status_code=403, detail="僅限管理員存取")
+    return current_user
+
+@app.get("/api/admin/reports")
+def get_reports(current_user: str = Depends(get_current_admin)):
+    with engine.connect() as conn:
+        reports = conn.execute(
+            text("SELECT id, reporter_email, target_type, target_id, reason, status, created_at FROM Reports ORDER BY created_at DESC")
+        ).fetchall()
+
+        result = []
+        for r in reports:
+            report_id, reporter_email, target_type, target_id, reason, status_val, created_at = r
+            target_content, target_author = None, None
+            if target_type == 'post':
+                row = conn.execute(text("SELECT user, content FROM Posts WHERE id = :id"), {"id": target_id}).fetchone()
+            else:
+                row = conn.execute(text("SELECT author, content FROM Replies WHERE id = :id"), {"id": target_id}).fetchone()
+            if row:
+                target_author, target_content = row[0], row[1]
+
+            result.append({
+                "id": report_id, "reporter_email": reporter_email, "target_type": target_type,
+                "target_id": target_id, "reason": reason, "status": status_val,
+                "created_at": str(created_at), "target_author": target_author,
+                "target_content": target_content
+            })
+        return {"status": "success", "reports": result}
+
+class ReportStatusUpdate(BaseModel):
+    status: str  # 'open' 或 'resolved'
+
+@app.put("/api/admin/reports/{report_id}")
+def update_report_status(report_id: int, payload: ReportStatusUpdate, current_user: str = Depends(get_current_admin)):
+    with engine.connect() as conn:
+        conn.execute(
+            text("UPDATE Reports SET status = :s WHERE id = :id"),
+            {"s": payload.status, "id": report_id}
+        )
+        conn.commit()
+    return {"status": "success", "message": "已更新檢舉狀態"}
 
 @app.get("/api/blocks")
 def get_blocked_users(current_user: str = Depends(get_current_user)):
@@ -1609,11 +2240,102 @@ def get_ai_top_picks():
             "status": "success",
             "updated_at": cache_data.get("updated_at"),
             "scanned_count": cache_data.get("scanned_count"),
-            "top_bullish": cache_data.get("top_bullish", []),
+            "top_bullish_momentum": cache_data.get("top_bullish_momentum", []),
+            "top_bullish_emerging": cache_data.get("top_bullish_emerging", []),
             "top_bearish": cache_data.get("top_bearish", [])
         }
     except Exception as e:
         return {"status": "error", "message": f"讀取快取失敗: {str(e)}"}
+
+AI_PICK_FEE_RATE = 0.6  # 百分比：概估來回手續費0.1425%*2 + 賣出證交稅0.3%，扣掉後才是比較貼近實際的報酬，寫論文時分開呈現才嚴謹
+
+@app.get("/api/ai_pick_performance")
+def get_ai_pick_performance():
+    """AI精選模擬交易的長期績效追蹤，浮動報酬(用最新收盤價對比進場價)，
+    分動能延續(momentum)/潛力發掘(potential)/看跌追蹤(bearish，模擬放空)三類分別統計，
+    每類都同時給「無成本理想版」(avg_return)跟「概估手續費/滑價後」(avg_net_return)兩種數字，
+    並附上每一筆的個股明細，不只是分類後的整體平均。由 ai_top_picks_scanner.py 每日排程寫入"""
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT t.ticker, t.stock_name, t.signal_type, t.entry_price, t.entry_date,
+                       (SELECT close_price FROM StockPrice sp WHERE sp.ticker = t.ticker ORDER BY sp.trade_date DESC LIMIT 1) AS latest_close
+                FROM AiPickTrades t
+                WHERE entry_price IS NOT NULL
+            """)).fetchall()
+            pending_count = conn.execute(text("SELECT COUNT(*) FROM AiPickTrades WHERE entry_price IS NULL")).scalar()
+
+        stats = {}
+        trades = []
+        for ticker, name, signal_type, entry_price, entry_date, latest_close in rows:
+            if entry_price is None or latest_close is None or float(entry_price) == 0:
+                continue
+            entry_price = float(entry_price)
+            latest_close = float(latest_close)
+            # bearish(看跌追蹤)是模擬放空，股價跌越多報酬越高，方向跟做多的兩類相反
+            raw_return = (latest_close - entry_price) / entry_price * 100
+            gross_return = -raw_return if signal_type == "bearish" else raw_return
+            net_return = gross_return - AI_PICK_FEE_RATE
+
+            s = stats.setdefault(signal_type, {"gross": [], "net": [], "wins": 0, "count": 0})
+            s["gross"].append(gross_return)
+            s["net"].append(net_return)
+            s["count"] += 1
+            if gross_return > 0:
+                s["wins"] += 1
+
+            trades.append({
+                "ticker": ticker, "name": name, "signal_type": signal_type,
+                "entry_date": str(entry_date) if entry_date else None,
+                "entry_price": entry_price, "latest_close": latest_close,
+                "gross_return": round(gross_return, 2), "net_return": round(net_return, 2),
+            })
+
+        result = {
+            signal_type: {
+                "count": s["count"],
+                "avg_return": round(sum(s["gross"]) / s["count"], 2) if s["count"] else 0,
+                "avg_net_return": round(sum(s["net"]) / s["count"], 2) if s["count"] else 0,
+                "win_rate": round(s["wins"] / s["count"] * 100, 2) if s["count"] else 0,
+            }
+            for signal_type, s in stats.items()
+        }
+
+        trades.sort(key=lambda t: t["gross_return"], reverse=True)
+
+        return {
+            "status": "success", "stats": result, "pending_count": pending_count or 0,
+            "trades": trades, "fee_rate": AI_PICK_FEE_RATE,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"讀取績效失敗: {str(e)}"}
+
+@app.get("/api/ai_pick_performance_history")
+def get_ai_pick_performance_history(days: int = 30):
+    """AI精選模擬績效隨時間的變化(近N天平均報酬率)，由 ai_top_picks_scanner.py 每日排程寫入快照，
+    給前端畫趨勢圖用，不然只看累積總平均看不出績效是在變好還變差"""
+    days = max(1, min(days, 180))
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT snapshot_date, signal_type, avg_return, win_rate, trade_count
+                FROM AiPickPerformanceHistory
+                WHERE snapshot_date >= DATE_SUB(CURDATE(), INTERVAL :days DAY)
+                ORDER BY snapshot_date ASC
+            """), {"days": days}).fetchall()
+
+        history = {}
+        for snapshot_date, signal_type, avg_return, win_rate, trade_count in rows:
+            history.setdefault(signal_type, []).append({
+                "date": str(snapshot_date),
+                "avg_return": float(avg_return) if avg_return is not None else None,
+                "win_rate": float(win_rate) if win_rate is not None else None,
+                "trade_count": trade_count,
+            })
+
+        return {"status": "success", "history": history}
+    except Exception as e:
+        return {"status": "error", "message": f"讀取趨勢失敗: {str(e)}"}
 
 @app.get("/api/feature_importance")
 def get_feature_importance():
@@ -1630,6 +2352,7 @@ def get_feature_importance():
             "status": "success",
             "updated_at": data.get("updated_at"),
             "accuracy": data.get("accuracy"),
+            "metrics": data.get("metrics"),
             "features": data.get("features", [])
         }
     except Exception as e:
@@ -1650,12 +2373,39 @@ def get_prediction_accuracy(days: int = 30):
         if total == 0:
             return {"status": "success", "sample_size": 0, "hit_rate": None, "days": days, "message": "尚無已驗證的預測資料"}
 
+        # 除了整體命中率(準確率)，再由混淆矩陣算「精確率/召回率」：
+        #   精確率 = 預測會漲的裡面真的漲了多少(TP/(TP+FP))；召回率 = 真的漲的裡面被抓到多少(TP/(TP+FN))
+        # 預測方向以信心度>=50為「漲」；actual_direction 是下一個交易日收盤相對預測當天收盤（持平算未上漲）
+        with engine.connect() as conn:
+            cm = conn.execute(text("""
+                SELECT
+                    COALESCE(SUM(predicted_direction = 'up'   AND actual_direction = 'up'),   0) AS tp,
+                    COALESCE(SUM(predicted_direction = 'up'   AND actual_direction = 'down'), 0) AS fp,
+                    COALESCE(SUM(predicted_direction = 'down' AND actual_direction = 'up'),   0) AS fn,
+                    COALESCE(SUM(predicted_direction = 'down' AND actual_direction = 'down'), 0) AS tn,
+                    COALESCE(SUM(predicted_direction = 'up' AND confidence >= 65), 0)                          AS hi_n,
+                    COALESCE(SUM(predicted_direction = 'up' AND confidence >= 65 AND actual_direction = 'up'), 0) AS hi_tp
+                FROM PredictionLog
+                WHERE resolved = 1 AND predicted_at >= DATE_SUB(CURDATE(), INTERVAL :days DAY)
+            """), {"days": days}).fetchone()
+        tp, fp, fn, tn, hi_n, hi_tp = (int(x) for x in cm)
+        ratio = lambda a, b: round(a / b * 100, 2) if b else None
+        up_rate = ratio(tp + fn, total)
+
         return {
             "status": "success",
             "sample_size": total,
             "hit_rate": round(correct / total * 100, 2),
             "days": days,
-            "latest_date": str(row[2]) if row[2] else None
+            "latest_date": str(row[2]) if row[2] else None,
+            "confusion": {"tp": tp, "fp": fp, "fn": fn, "tn": tn},
+            "precision_up": ratio(tp, tp + fp),
+            "recall_up": ratio(tp, tp + fn),
+            "precision_down": ratio(tn, tn + fn),
+            "recall_down": ratio(tn, tn + fp),
+            "up_rate": up_rate,
+            "majority_baseline": max(up_rate, 100 - up_rate) if up_rate is not None else None,
+            "high_confidence_up": {"threshold": 65, "sample_size": hi_n, "precision": ratio(hi_tp, hi_n)},
         }
     except Exception as e:
         return {"status": "error", "message": f"讀取失敗: {str(e)}"}

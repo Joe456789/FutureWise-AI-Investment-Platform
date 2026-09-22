@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FutureWise AI - 看盤大廳 2.0</title>
+    <title>FutureWise AI - 看盤大廳</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
@@ -146,7 +146,7 @@
     <div class="app-container">
         
         <div class="header">
-            <div class="header-title"><i class="fas fa-chart-line"></i> 看盤大廳 2.0</div>
+            <div class="header-title"><i class="fas fa-chart-line"></i> 看盤大廳</div>
             <a href="profile.html" style="color: #a0a0a0; text-decoration: none; font-size: 18px; position: relative;"><i class="fas fa-user-circle"></i><span class="header-badge-dot" id="profileBadgeDot"></span></a>
         </div>
 
@@ -540,6 +540,9 @@
                 }
             }
             const response = await originalFetch(resource, config);
+            if (response.status === 403 && typeof resource === 'string' && resource.includes(API_BASE_URL)) {
+                response.clone().json().then(b => { if (b && b.detail && b.detail.code === 'CONSENT_REQUIRED') window.location.href = 'consent.html?required=1'; }).catch(() => {});
+            }
             if(response.status === 401 && !resource.includes('/api/auth/login') && !resource.includes('/api/auth/register')) {
                 alert('登入已過期或權限不足，請重新登入');
                 window.location.href = 'login.html';
@@ -595,11 +598,20 @@
 
                 if (result.data && result.data.length >= 2) {
                     const dataArray = result.data;
-                    const latestPrice = dataArray[dataArray.length - 1].close_price;
-                    const prevPrice = dataArray[dataArray.length - 2].close_price;
+                    const latestRow = dataArray[dataArray.length - 1];
+                    const latestPrice = latestRow.close_price;
 
-                    const diff = latestPrice - prevPrice;
-                    const percent = (diff / prevPrice) * 100;
+                    // 優先使用後端算好的 Change_1D（不受資料斷層影響），
+                    // 陣列倒數第二筆若剛好卡在資料斷層前，直接相減會算出離譜的漲跌幅
+                    let diff, percent;
+                    if (latestRow.Change_1D !== null && latestRow.Change_1D !== undefined && isFinite(latestRow.Change_1D)) {
+                        percent = latestRow.Change_1D * 100;
+                        diff = latestPrice - latestPrice / (1 + latestRow.Change_1D);
+                    } else {
+                        const prevPrice = dataArray[dataArray.length - 2].close_price;
+                        diff = latestPrice - prevPrice;
+                        percent = (diff / prevPrice) * 100;
+                    }
                     const isBullish = diff >= 0;
 
                     document.getElementById(valueId).innerText = latestPrice.toFixed(2);

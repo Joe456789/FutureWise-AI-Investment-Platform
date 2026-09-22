@@ -7,6 +7,20 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
     <style>
+        /* 設計語彙（跟dashboard.html同一套shadcn/ui風格token，統一全站視覺質感） */
+        :root {
+            --sc-radius: 0.75rem;
+            --sc-card-bg: #17181c;
+            --sc-card-border: rgba(255,255,255,0.08);
+            --sc-muted-fg: #94a3b8;
+            --sc-up: #ef4444;   /* 台股慣例：紅漲 */
+            --sc-down: #22c55e; /* 台股慣例：綠跌 */
+        }
+        .sc-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.4; white-space: nowrap; }
+        .sc-badge-up { background: rgba(239, 68, 68, 0.12); color: var(--sc-up); }
+        .sc-badge-down { background: rgba(34, 197, 94, 0.12); color: var(--sc-down); }
+        .sc-badge-neutral { background: rgba(148, 163, 184, 0.12); color: var(--sc-muted-fg); }
+
         /* 基礎設定與深色背景 */
         body { margin: 0; padding: 0; background-color: #000000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; color: #ffffff; }
         .app-container { width: 100%; max-width: 414px; height: 100vh; background-color: #121212; position: relative; display: flex; flex-direction: column; box-shadow: 0 0 20px rgba(255, 255, 255, 0.1); overflow: hidden; }
@@ -185,6 +199,7 @@
                     <div class="ai-picks-tab active" id="aiTabMarket" onclick="switchAiPicksTab('market')">全市場精選</div>
                     <div class="ai-picks-tab" id="aiTabWatch" onclick="switchAiPicksTab('watch')">我的關注股</div>
                 </div>
+                <div id="aiPickPerformance" style="display:none; margin-bottom:10px;"></div>
                 <div id="aiSelectionContainer">
                     <div class="skeleton-block" style="height:11px; width:60%; margin-bottom:10px;"></div>
                     <div class="skeleton-stock-card"><div class="skeleton-block" style="height:16px; width:40%; margin-bottom:10px;"></div><div class="skeleton-block" style="height:12px; width:70%;"></div></div>
@@ -210,7 +225,7 @@
                 <div class="card">
                     <div class="watchlist-header watchlist-grid">
                         <span class="left">商品</span>
-                        <span class="center">趨勢</span>
+                        <span class="center">AI訊號</span>
                         <span class="right">最新價/漲跌幅</span>
                     </div>
                     
@@ -259,6 +274,9 @@
                 }
             }
             const response = await originalFetch(resource, config);
+            if (response.status === 403 && typeof resource === 'string' && resource.includes(API_BASE_URL)) {
+                response.clone().json().then(b => { if (b && b.detail && b.detail.code === 'CONSENT_REQUIRED') window.location.href = 'consent.html?required=1'; }).catch(() => {});
+            }
             if(response.status === 401 && !resource.includes('/api/auth/login') && !resource.includes('/api/auth/register')) {
                 alert('登入已過期或權限不足，請重新登入');
                 window.location.href = 'login.html';
@@ -362,8 +380,42 @@
             }
         }
 
-        // 「AI精選」＝ XGBoost 對全市場最新資料排名後的前 5 名（後端排程批次算好、寫入快取，
-        // 跟自選股/收藏完全無關，是 AI 主動幫你發掘的標的）
+        // 單一檔股票卡片的HTML，動能股/潛力股共用同一個渲染方式
+        function renderPickCard(item) {
+            const hasDiff = item.diff !== null && item.diff !== undefined;
+            const priceClass = !hasDiff ? "text-flat" : (item.diff > 0 ? "text-up" : (item.diff < 0 ? "text-down" : "text-flat"));
+            const sign = hasDiff && item.diff > 0 ? "+" : "";
+            const tagColor = item.confidence >= 55 ? "#ef4444" : (item.confidence <= 45 ? "#22c55e" : "#38bdf8");
+            const tagBg = item.confidence >= 55 ? "rgba(239, 68, 68, 0.1)" : (item.confidence <= 45 ? "rgba(34, 197, 94, 0.1)" : "rgba(56, 189, 248, 0.1)");
+
+            return `
+            <div class="stock-card" onclick="goToDashboard('${item.ticker}')">
+                <div class="stock-info">
+                    <div class="name-code"><span class="name">${item.name}</span> <span class="code">${item.ticker}</span></div>
+                    <div class="ai-tag" style="color: ${tagColor}; background-color: ${tagBg};">
+                        <i class="fas fa-brain"></i> AI勝率 ${item.confidence}% | ${item.prediction}
+                    </div>
+                </div>
+                <div class="stock-price">
+                    <div class="price ${priceClass}">${item.price !== null ? item.price.toFixed(2) : '--'}</div>
+                    <div class="change ${priceClass}">${hasDiff ? `${sign}${item.diff.toFixed(2)} (${sign}${item.percent.toFixed(2)}%)` : '--'}</div>
+                </div>
+            </div>`;
+        }
+
+        function renderPickGroup(title, hint, items) {
+            if (items.length === 0) return '';
+            let html = `<div style="font-size:12px; color:#e2e8f0; font-weight:bold; margin:14px 0 6px;">${title}</div>
+                         <div style="font-size:10px; color:#94a3b8; margin-bottom:8px;">${hint}</div>`;
+            items.forEach(item => { html += renderPickCard(item); });
+            return html;
+        }
+
+        // 「AI精選」＝ XGBoost 對全市場最新資料排名後的結果（後端排程批次算好、寫入快取，
+        // 跟自選股/收藏完全無關，是 AI 主動幫你發掘的標的）。
+        // 拆成「動能延續」跟「潛力發掘」兩類：今天漲幅已經很大的股票，AI給高分常常只是
+        // 量能/K值/D值同時衝到極端值，比較像追價訊號，跟「還沒噴、AI覺得有機會」的股票分開看，
+        // 避免使用者誤把追高股當成AI挖到的潛力股
         async function runAIStockScreener() {
             const container = document.getElementById('aiSelectionContainer');
             container.innerHTML = skeletonStockCards(3);
@@ -377,38 +429,106 @@
                     return;
                 }
 
-                const scanResults = result.top_bullish || [];
+                const momentum = result.top_bullish_momentum || [];
+                const emerging = result.top_bullish_emerging || [];
+
                 container.innerHTML = `<div style="font-size:11px; color:#94a3b8; margin-bottom:10px;">全市場 ${result.scanned_count || '--'} 檔股票 XGBoost 排名，更新於: ${result.updated_at}</div>`;
 
-                if (scanResults.length === 0) {
+                if (momentum.length === 0 && emerging.length === 0) {
                     container.innerHTML += `<div style="text-align:center; padding:20px; color:#a0a0a0;">目前沒有可顯示的排名結果。</div>`;
                     return;
                 }
 
-                scanResults.forEach(item => {
-                    const hasDiff = item.diff !== null && item.diff !== undefined;
-                    const priceClass = !hasDiff ? "text-flat" : (item.diff > 0 ? "text-up" : (item.diff < 0 ? "text-down" : "text-flat"));
-                    const sign = hasDiff && item.diff > 0 ? "+" : "";
-                    const tagColor = item.confidence >= 55 ? "#ef4444" : (item.confidence <= 45 ? "#22c55e" : "#38bdf8");
-                    const tagBg = item.confidence >= 55 ? "rgba(239, 68, 68, 0.1)" : (item.confidence <= 45 ? "rgba(34, 197, 94, 0.1)" : "rgba(56, 189, 248, 0.1)");
-
-                    const html = `
-                    <div class="stock-card" onclick="goToDashboard('${item.ticker}')">
-                        <div class="stock-info">
-                            <div class="name-code"><span class="name">${item.name}</span> <span class="code">${item.ticker}</span></div>
-                            <div class="ai-tag" style="color: ${tagColor}; background-color: ${tagBg};">
-                                <i class="fas fa-brain"></i> AI勝率 ${item.confidence}% | ${item.prediction}
-                            </div>
-                        </div>
-                        <div class="stock-price">
-                            <div class="price ${priceClass}">${item.price !== null ? item.price.toFixed(2) : '--'}</div>
-                            <div class="change ${priceClass}">${hasDiff ? `${sign}${item.diff.toFixed(2)} (${sign}${item.percent.toFixed(2)}%)` : '--'}</div>
-                        </div>
-                    </div>`;
-                    container.innerHTML += html;
-                });
+                container.innerHTML += renderPickGroup('🌱 潛力發掘', '今日漲幅尚未大幅擴張，AI仍給出偏多信心分數', emerging);
+                container.innerHTML += renderPickGroup('🔥 動能延續', '今日漲幅已達5%以上，追價風險較高，僅供參考', momentum);
             } catch (error) {
                 container.innerHTML = `<div class="error-msg"><b>無法連上伺服器取得AI精選結果</b></div>`;
+            }
+        }
+
+        // AI精選長期模擬績效：假設每次精選出爐隔天開盤都真的買進(bearish類則模擬放空)，
+        // 累積到現在的浮動報酬，動能延續/潛力發掘/看跌追蹤分開統計，直接驗證這個分類本身有沒有意義。
+        // 同時給「無成本理想版」跟「概估手續費/滑價後」兩種數字，並附上近30天走勢小圖跟個股明細
+        const SIGNAL_META = {
+            potential: { icon: '🌱', label: '潛力發掘' },
+            momentum: { icon: '🔥', label: '動能延續' },
+            bearish: { icon: '🐻', label: '看跌追蹤(模擬放空)' },
+        };
+
+        function sparklineSvg(points, color) {
+            if (!points || points.length < 2) return '';
+            const w = 120, h = 28;
+            const values = points.map(p => p.avg_return).filter(v => v !== null && v !== undefined);
+            if (values.length < 2) return '';
+            const min = Math.min(...values), max = Math.max(...values);
+            const range = (max - min) || 1;
+            const step = w / (values.length - 1);
+            const coords = values.map((v, i) => `${(i * step).toFixed(1)},${(h - ((v - min) / range) * h).toFixed(1)}`).join(' ');
+            return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;"><polyline points="${coords}" fill="none" stroke="${color}" stroke-width="1.5"/></svg>`;
+        }
+
+        function pickPerfCard(signalType, stat, trendPoints) {
+            if (!stat || stat.count === 0) return '';
+            const meta = SIGNAL_META[signalType] || { icon: '📊', label: signalType };
+            const up = stat.avg_return >= 0;
+            const color = up ? '#ef4444' : '#22c55e';
+            const sign = up ? '+' : '';
+            const netUp = stat.avg_net_return >= 0;
+            const netColor = netUp ? '#ef4444' : '#22c55e';
+            const netSign = netUp ? '+' : '';
+            const spark = sparklineSvg(trendPoints, color);
+            return `<div class="sc-card" style="flex:1; min-width:160px; padding:10px 12px;">
+                <div style="font-size:11px; color:#94a3b8; margin-bottom:4px;">${meta.icon} ${meta.label}（${stat.count}筆）</div>
+                <div style="font-size:17px; font-weight:bold; color:${color};">${sign}${stat.avg_return}%</div>
+                <div style="font-size:10px; color:#64748b; margin-top:2px;">勝率 ${stat.win_rate}% ・ 扣費後 <span style="color:${netColor};">${netSign}${stat.avg_net_return}%</span></div>
+                ${spark ? `<div style="margin-top:6px;">${spark}</div>` : ''}
+            </div>`;
+        }
+
+        function renderPickTrades(trades) {
+            if (!trades || trades.length === 0) return '';
+            const rows = trades.map(t => {
+                const up = t.gross_return >= 0;
+                const color = up ? '#ef4444' : '#22c55e';
+                const sign = up ? '+' : '';
+                const metaLabel = (SIGNAL_META[t.signal_type] || { label: t.signal_type }).label;
+                return `<div style="display:flex; justify-content:space-between; gap:8px; padding:6px 0; border-bottom:1px solid #2a2a2a; font-size:12px;">
+                    <span style="color:#cbd5e1; flex:1;">${t.name || t.ticker} <span style="color:#64748b;">${t.ticker}</span></span>
+                    <span style="color:#64748b;">${metaLabel}</span>
+                    <span style="color:${color}; font-weight:bold;">${sign}${t.gross_return}%</span>
+                </div>`;
+            }).join('');
+            return `<details style="margin-top:8px;">
+                <summary style="cursor:pointer; font-size:11px; color:#38bdf8;">查看個股明細（${trades.length}筆）</summary>
+                <div style="max-height:220px; overflow-y:auto; margin-top:6px;">${rows}</div>
+            </details>`;
+        }
+
+        async function loadAiPickPerformance() {
+            const el = document.getElementById('aiPickPerformance');
+            try {
+                const [perfRes, histRes] = await Promise.all([
+                    fetch(`${API_BASE_URL}/api/ai_pick_performance`),
+                    fetch(`${API_BASE_URL}/api/ai_pick_performance_history?days=30`)
+                ]);
+                const data = await perfRes.json();
+                const histData = await histRes.json();
+                if (data.status !== 'success') return;
+
+                const history = histData.status === 'success' ? (histData.history || {}) : {};
+                const cards = ['potential', 'momentum', 'bearish']
+                    .map(type => pickPerfCard(type, data.stats[type], history[type]))
+                    .join('');
+                if (!cards) return; // 還沒有累積到任何已進場的模擬交易，先不顯示這區塊
+
+                el.innerHTML = `
+                    <div style="font-size:11px; color:#94a3b8; margin-bottom:6px;">📊 AI精選模擬績效（假設隔天開盤買進/放空，浮動報酬持續累積中，含近30天走勢）</div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">${cards}</div>
+                    ${renderPickTrades(data.trades)}
+                    <div style="font-size:10px; color:#64748b; margin-top:6px;">＊扣費後估算含來回手續費+證交稅約${data.fee_rate}%，實際交易成本依券商而定</div>`;
+                el.style.display = 'block';
+            } catch (error) {
+                console.error('讀取AI精選模擬績效失敗:', error);
             }
         }
 
@@ -641,8 +761,28 @@
 
         async function fetchWatchlistData(ticker) {
             try {
-                const response = await fetch(`${API_BASE_URL}/api/stock/${ticker}`);
+                const [response, predResult] = await Promise.all([
+                    fetch(`${API_BASE_URL}/api/stock/${ticker}`),
+                    fetch(`${API_BASE_URL}/api/prediction/${ticker}`).then(r => r.ok ? r.json() : null).catch(() => null)
+                ]);
                 const result = await response.json();
+
+                const trendElement = document.getElementById(`trend-${ticker}`);
+                if (trendElement && predResult && typeof predResult.confidence === 'number') {
+                    const conf = predResult.confidence;
+                    if (conf >= 55) {
+                        trendElement.innerText = `偏多 ${conf}%`;
+                        trendElement.className = "change-badge bg-up-light text-up";
+                    } else if (conf <= 45) {
+                        trendElement.innerText = `偏空 ${conf}%`;
+                        trendElement.className = "change-badge bg-down-light text-down";
+                    } else {
+                        trendElement.innerText = `觀望 ${conf}%`;
+                        trendElement.className = "change-badge";
+                    }
+                } else if (trendElement) {
+                    trendElement.innerText = "--";
+                }
 
                 if (result.data && result.data.length >= 2) {
                     const dataArray = result.data;
@@ -673,29 +813,20 @@
 
                     const priceElement = document.getElementById(`price-${ticker}`);
                     const changeElement = document.getElementById(`change-${ticker}`);
-                    const trendElement = document.getElementById(`trend-${ticker}`); 
-                    
+
                     if(priceElement) priceElement.innerText = latestPrice.toFixed(2);
-                    
+
                     if (diff > 0) {
                         if(priceElement) priceElement.className = "price text-up";
                         if(changeElement) {
                             changeElement.className = "change change-badge bg-up-light text-up";
                             changeElement.innerText = `+${diff.toFixed(2)} (+${percent.toFixed(2)}%)`;
                         }
-                        if(trendElement) {
-                            trendElement.innerText = "做多";
-                            trendElement.className = "change-badge bg-up-light text-up";
-                        }
                     } else if (diff < 0) {
                         if(priceElement) priceElement.className = "price text-down";
                         if(changeElement) {
                             changeElement.className = "change change-badge bg-down-light text-down";
                             changeElement.innerText = `${diff.toFixed(2)} (${percent.toFixed(2)}%)`;
-                        }
-                        if(trendElement) {
-                            trendElement.innerText = "做空";
-                            trendElement.className = "change-badge bg-down-light text-down";
                         }
                     } else {
                         if(priceElement) {
@@ -707,12 +838,6 @@
                             changeElement.style.backgroundColor = "#333";
                             changeElement.style.color = "#a0a0a0";
                             changeElement.innerText = `0.00 (0.00%)`;
-                        }
-                        if(trendElement) {
-                            trendElement.innerText = "觀望";
-                            trendElement.className = "change-badge";
-                            trendElement.style.backgroundColor = "#333";
-                            trendElement.style.color = "#a0a0a0";
                         }
                     }
                 }
@@ -764,6 +889,7 @@
             
             // 2. 啟動 B 區的 XGBoost AI 精選（「我的關注股」分頁改成點到才載入，減少一進頁面的請求量）
             runAIStockScreener();
+            loadAiPickPerformance();
             setupStockAutocomplete('quickSearchInput', () => runQuickSearch());
 
             // 3. 載入 C 區自選股（跟收藏共用同一份後端資料）

@@ -6,6 +6,16 @@
     <title>幫助與客服 - FutureWise AI</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
+        /* 設計語彙（跟dashboard.html同一套shadcn/ui風格token，統一全站視覺質感） */
+        :root {
+            --sc-radius: 0.75rem;
+            --sc-card-bg: #17181c;
+            --sc-card-border: rgba(255,255,255,0.08);
+            --sc-muted-fg: #94a3b8;
+            --sc-up: #ef4444;   /* 台股慣例：紅漲 */
+            --sc-down: #22c55e; /* 台股慣例：綠跌 */
+        }
+
         * { box-sizing: border-box; }
         body { margin: 0; padding: 0; background-color: #000000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; color: #ffffff; }
         .app-container { width: 100%; max-width: 414px; height: 100vh; max-height: 896px; background-color: #121212; position: relative; display: flex; flex-direction: column; box-shadow: 0 0 20px rgba(255, 255, 255, 0.05); overflow: hidden; }
@@ -18,7 +28,7 @@
         .section-title { font-size: 13px; color: #94a3b8; margin: 20px 0 10px 0; text-transform: uppercase; letter-spacing: 1px; }
         .section-title:first-child { margin-top: 0; }
 
-        .faq-item { background-color: #1e1e1e; border: 1px solid #2a2a2a; border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
+        .faq-item { background: var(--sc-card-bg); border: 1px solid var(--sc-card-border); border-radius: var(--sc-radius); margin-bottom: 10px; overflow: hidden; }
         .faq-question { padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 14px; color: #e2e8f0; }
         .faq-answer { max-height: 0; overflow: hidden; transition: 0.25s ease; font-size: 13px; color: #999; line-height: 1.6; }
         .faq-answer-inner { padding: 0 16px 14px 16px; }
@@ -62,7 +72,7 @@
                 <div class="faq-question" onclick="toggleFaq(this)">
                     AI 預測結果準確嗎？<i class="fas fa-chevron-down faq-chevron"></i>
                 </div>
-                <div class="faq-answer"><div class="faq-answer-inner">模型以歷史資料回測，方向預測準確率約 66.76%，僅供研究與參考，不構成投資建議，請自行評估風險。</div></div>
+                <div class="faq-answer"><div class="faq-answer-inner">模型以歷史資料回測，方向預測<span id="faqHitRate">準確率請至AI分析頁查看即時勝率</span>，僅供研究與參考，不構成投資建議，請自行評估風險。</div></div>
             </div>
 
             <div class="faq-item">
@@ -88,7 +98,7 @@
                 <label for="sup-message">詳細內容</label>
                 <textarea id="sup-message" placeholder="請詳細描述您遇到的問題..."></textarea>
             </div>
-            <button class="send-btn rip-btn" onclick="submitTicket()">送出</button>
+            <button class="send-btn rip-btn" onclick="submitTicket(this)">送出</button>
         </div>
     </div>
 
@@ -110,7 +120,11 @@
                     config.headers['Authorization'] = 'Bearer ' + token;
                 }
             }
-            return originalFetch(resource, config);
+            const __resp = await originalFetch(resource, config);
+            if (__resp.status === 403 && typeof resource === 'string' && resource.includes(API_BASE_URL)) {
+                __resp.clone().json().then(b => { if (b && b.detail && b.detail.code === 'CONSENT_REQUIRED') window.location.href = 'consent.html?required=1'; }).catch(() => {});
+            }
+            return __resp;
         };
         // -----------------------------
         const token = localStorage.getItem('access_token');
@@ -126,7 +140,21 @@
             setTimeout(() => t.classList.remove('show'), 2500);
         }
 
-        async function submitTicket() {
+        // 近30天模型勝率，用來取代 FAQ 裡寫死的準確率數字
+        async function loadFaqHitRate() {
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/prediction_accuracy?days=30`);
+                const d = await res.json();
+                const el = document.getElementById('faqHitRate');
+                if (!el) return;
+                if (d.hit_rate === null || d.hit_rate === undefined) return;
+                el.innerText = `準確率約 ${d.hit_rate}%`;
+            } catch (error) {
+                console.error('FAQ 模型勝率讀取失敗:', error);
+            }
+        }
+
+        async function submitTicket(btn) {
             if (!token) {
                 showToast('請先登入才能送出問題');
                 setTimeout(() => window.location.href = 'login.html', 1200);
@@ -137,6 +165,11 @@
             if (!subject || !message) {
                 showToast('請填寫主旨與內容');
                 return;
+            }
+            const originalText = btn ? btn.innerText : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerText = '送出中...';
             }
             try {
                 const res = await fetch(`${API_BASE_URL}/api/support`, {
@@ -152,8 +185,15 @@
             } catch (err) {
                 console.error(err);
                 showToast('送出失敗，請稍後再試');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerText = originalText;
+                }
             }
         }
+
+        loadFaqHitRate();
     </script>
     <script>
         document.addEventListener('click', function(e) {

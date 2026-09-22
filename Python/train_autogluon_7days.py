@@ -14,9 +14,15 @@ def train_autogluon():
     print("[Step 1] 正在從 MySQL 讀取近 2 年歷史資料...")
     try:
         engine = create_engine(MYSQL_CONN_STR)
+        # 輔助欄位（past_covariates）挑選依據：Universal Trainer.py 修正回測洩漏後，
+        # 這幾個是實際重訓出來排名最前面的個股訊號，而不是隨便挑的，
+        # 刻意避開本益比/EPS這類季更新的基本面欄位，因為更新頻率太低、每天大多是NaN，會拖累訓練品質
         query = """
             SELECT ticker AS 股票代碼, trade_date AS 交易日期, close_price AS 收盤價,
-                   volume AS 成交量, Foreign_Buy AS 外資買賣超
+                   volume AS 成交量, Foreign_Buy AS 外資買賣超, Trust_Buy AS 投信買賣超, Dealer_Buy AS 自營商買賣超,
+                   Vol_Ratio AS 量能比, KD_K AS K值, KD_D AS D值, RSI_14,
+                   Bias_5 AS `5日乖離`, Change_1D AS 漲跌幅_1日,
+                   Market_Return AS 大盤漲跌幅, TWD_Exchange AS 台幣匯率, SOX_Return AS 費半漲跌
             FROM StockPrice
             WHERE trade_date >= (SELECT DATE_SUB(MAX(trade_date), INTERVAL 2 YEAR) FROM StockPrice)
         """

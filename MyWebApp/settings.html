@@ -24,6 +24,14 @@
             width: 100%; padding: 12px; border: 1px solid #333; background: #1e1e1e;
             border-radius: 8px; color: white; box-sizing: border-box; outline: none;
         }
+        /* 密碼欄位右側「顯示/隱藏密碼」眼睛按鈕 */
+        .pw-wrap { position: relative; }
+        .pw-wrap input[type="password"], .pw-wrap input[type="text"].pw-input { padding-right: 42px; }
+        .pw-toggle { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); background: none; border: none; padding: 6px; cursor: pointer; color: #94a3b8; display: flex; align-items: center; }
+        .pw-toggle:hover { color: #cbd5e1; }
+        .pw-toggle svg { width: 18px; height: 18px; display: block; }
+        .pw-toggle .eye-closed { display: none; }
+
         .input-group input:focus { border-color: #38bdf8; }
 
         .save-btn {
@@ -54,30 +62,30 @@
             <div class="section-title">基本資料</div>
             <div class="input-group">
                 <label for="set-email">Email（帳號，無法修改）</label>
-                <input type="email" id="set-email" disabled>
+                <input type="email" id="set-email" placeholder="載入中..." disabled>
             </div>
             <div class="input-group">
                 <label for="set-name">姓名</label>
-                <input type="text" id="set-name" placeholder="您的姓名">
+                <input type="text" id="set-name" placeholder="載入中...">
             </div>
             <div class="input-group">
                 <label for="set-phone">聯絡電話</label>
-                <input type="tel" id="set-phone" placeholder="聯絡電話">
+                <input type="tel" id="set-phone" placeholder="載入中...">
             </div>
-            <button class="save-btn rip-btn" onclick="saveProfile()">儲存變更</button>
+            <button class="save-btn rip-btn" onclick="saveProfile(this)">儲存變更</button>
 
             <hr class="divider">
 
             <div class="section-title">變更密碼</div>
             <div class="input-group">
                 <label for="set-old-pw">舊密碼</label>
-                <input type="password" id="set-old-pw" placeholder="請輸入目前密碼">
+                <div class="pw-wrap"><input type="password" id="set-old-pw" placeholder="請輸入目前密碼"><button type="button" class="pw-toggle" tabindex="-1" aria-label="顯示密碼" onclick="togglePw('set-old-pw', this)"><svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><svg class="eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg></button></div>
             </div>
             <div class="input-group">
                 <label for="set-new-pw">新密碼</label>
-                <input type="password" id="set-new-pw" placeholder="請設定新密碼">
+                <div class="pw-wrap"><input type="password" id="set-new-pw" placeholder="請設定新密碼"><button type="button" class="pw-toggle" tabindex="-1" aria-label="顯示密碼" onclick="togglePw('set-new-pw', this)"><svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><svg class="eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg></button></div>
             </div>
-            <button class="save-btn secondary" onclick="changePassword()">更新密碼</button>
+            <button class="save-btn secondary rip-btn" onclick="changePassword(this)">更新密碼</button>
         </div>
     </div>
 
@@ -99,13 +107,28 @@
                     config.headers['Authorization'] = 'Bearer ' + token;
                 }
             }
-            return originalFetch(resource, config);
+            const __resp = await originalFetch(resource, config);
+            if (__resp.status === 403 && typeof resource === 'string' && resource.includes(API_BASE_URL)) {
+                __resp.clone().json().then(b => { if (b && b.detail && b.detail.code === 'CONSENT_REQUIRED') window.location.href = 'consent.html?required=1'; }).catch(() => {});
+            }
+            return __resp;
         };
         // -----------------------------
         const token = localStorage.getItem('access_token');
 
         if (!token) {
             window.location.href = 'login.html';
+        }
+
+
+        // 密碼欄位右側的「顯示/隱藏密碼」眼睛按鈕
+        function togglePw(inputId, btn) {
+            const input = document.getElementById(inputId);
+            const show = input.type === 'password';
+            input.type = show ? 'text' : 'password';
+            input.classList.toggle('pw-input', show);
+            btn.querySelector('.eye-open').style.display = show ? 'none' : '';
+            btn.querySelector('.eye-closed').style.display = show ? '' : 'none';
         }
 
         function showToast(msg) {
@@ -132,12 +155,21 @@
             } catch (err) {
                 console.error(err);
                 showToast('載入失敗，請檢查網路連線');
+            } finally {
+                document.getElementById('set-email').placeholder = '';
+                document.getElementById('set-name').placeholder = '您的姓名';
+                document.getElementById('set-phone').placeholder = '聯絡電話';
             }
         }
 
-        async function saveProfile() {
+        async function saveProfile(btn) {
             const name = document.getElementById('set-name').value.trim();
             const phone = document.getElementById('set-phone').value.trim();
+            const originalText = btn ? btn.innerText : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerText = '儲存中...';
+            }
             try {
                 const res = await fetch(`${API_BASE_URL}/api/user/me`, {
                     method: 'PUT',
@@ -149,15 +181,29 @@
             } catch (err) {
                 console.error(err);
                 showToast('更新失敗，請稍後再試');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerText = originalText;
+                }
             }
         }
 
-        async function changePassword() {
+        async function changePassword(btn) {
             const oldPw = document.getElementById('set-old-pw').value;
             const newPw = document.getElementById('set-new-pw').value;
             if (!oldPw || !newPw) {
                 showToast('請輸入舊密碼與新密碼');
                 return;
+            }
+            if (newPw.length < 6) {
+                showToast('新密碼長度至少需要6碼');
+                return;
+            }
+            const originalText = btn ? btn.innerText : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerText = '儲存中...';
             }
             try {
                 const res = await fetch(`${API_BASE_URL}/api/user/password`, {
@@ -170,12 +216,19 @@
                     showToast(result.detail || '密碼更新失敗');
                     return;
                 }
-                showToast('密碼已更新');
+                // 改密碼後舊的登入憑證會失效，伺服器會換發一張新的給這個裝置，存起來才不會被自己登出
+                if (result.access_token) localStorage.setItem('access_token', result.access_token);
+                showToast('密碼已更新，其他裝置已登出');
                 document.getElementById('set-old-pw').value = '';
                 document.getElementById('set-new-pw').value = '';
             } catch (err) {
                 console.error(err);
                 showToast('更新失敗，請稍後再試');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerText = originalText;
+                }
             }
         }
 

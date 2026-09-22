@@ -77,8 +77,9 @@ def fetch_all_market_chips(trading_dates):
         try:
             url = f"https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php?l=zh-tw&o=json&se=EW&t=D&d={dt_tpex}"
             res = session.get(url, timeout=10, verify=False).json()
-            if 'aaData' in res:
-                for row in res['aaData']:
+            tpex_rows = res.get('tables', [{}])[0].get('data', [])
+            if tpex_rows:
+                for row in tpex_rows:
                     all_chips.append({
                         'date_str': dt_key, 'ticker': str(row[0]).strip(), 
                         'f': float(str(row[10]).replace(',', '')) / 1000, 

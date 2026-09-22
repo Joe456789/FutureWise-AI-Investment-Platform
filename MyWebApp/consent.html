@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>隱私與資料授權 - FutureWise AI</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --sc-radius: 0.75rem;
+            --sc-card-bg: #17181c;
+            --sc-card-border: rgba(255,255,255,0.08);
+            --sc-muted-fg: #94a3b8;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; padding: 0; background-color: #000000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; color: #ffffff; }
+        .app-container { width: 100%; max-width: 414px; height: 100vh; max-height: 896px; background-color: #121212; position: relative; display: flex; flex-direction: column; box-shadow: 0 0 20px rgba(255, 255, 255, 0.05); overflow: hidden; }
+        .header { padding: 10px 20px; background-color: #1e1e1e; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; height: 60px; }
+        .header .back-btn { color: #a0a0a0; text-decoration: none; display: flex; align-items: center; gap: 5px; font-size: 16px; width: 60px; }
+        .header-title { font-size: 18px; font-weight: bold; color: #e2e8f0; text-align: center; flex: 1; }
+        .header-placeholder { width: 60px; }
+        .content { flex: 1; overflow-y: auto; padding: 20px 25px; }
+
+        .notice-banner { border-radius: 10px; padding: 12px 14px; font-size: 13px; line-height: 1.6; margin-bottom: 20px; display: flex; gap: 10px; align-items: flex-start; background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.3); color: #93c5fd; }
+        .notice-banner.warn { background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.4); color: #fcd34d; }
+
+        .consent-card { background: var(--sc-card-bg); border: 1px solid var(--sc-card-border); border-radius: var(--sc-radius); padding: 14px 16px; margin-bottom: 12px; }
+        .consent-card.needs-action { border-color: rgba(245, 158, 11, 0.5); }
+        .consent-row { display: flex; gap: 12px; align-items: flex-start; }
+        .consent-row input[type=checkbox] { width: 20px; height: 20px; margin-top: 1px; flex-shrink: 0; accent-color: #38bdf8; cursor: pointer; }
+        .consent-row input[type=checkbox]:disabled { cursor: not-allowed; opacity: 0.7; }
+        .consent-label { font-size: 14px; color: #e2e8f0; line-height: 1.5; cursor: pointer; flex: 1; }
+        .consent-summary { font-size: 12px; color: #94a3b8; margin-top: 3px; }
+        .tag { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px; margin-right: 6px; font-weight: 600; }
+        .tag.req { background: rgba(239,68,68,0.15); color: #f87171; }
+        .tag.opt { background: rgba(148,163,184,0.15); color: #94a3b8; }
+        .tag.ver { background: rgba(56,189,248,0.12); color: #38bdf8; }
+        .tag.new { background: rgba(245,158,11,0.18); color: #fbbf24; }
+        .toggle-body { font-size: 12px; color: #38bdf8; cursor: pointer; background: none; border: none; padding: 6px 0 0 32px; }
+        .body-box { display: none; margin: 8px 0 0 32px; padding: 12px; max-height: 260px; overflow-y: auto; background: rgba(0,0,0,0.3); border-radius: 8px; font-size: 13px; color: #cbd5e1; line-height: 1.8; white-space: pre-wrap; }
+        .body-box.open { display: block; }
+
+        .save-btn { width: 100%; padding: 14px; background: linear-gradient(135deg, #0ea5e9, #2563eb); border: none; border-radius: 8px; color: white; font-size: 15px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        .save-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .empty-state { text-align: center; color: #94a3b8; margin: 40px 0; font-size: 14px; }
+
+        .toast { position: fixed; bottom: 30px; left: 50%; background: #1e1e1e; border: 1px solid #38bdf8; color: #e2e8f0; padding: 10px 20px; border-radius: 20px; font-size: 13px; opacity: 0; pointer-events: none; z-index: 50; transform: translateX(-50%) translateY(16px) scale(0.9); transition: opacity 0.25s ease, transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div class="header">
+            <a href="profile.html" class="back-btn" id="backBtn"><i class="fas fa-chevron-left"></i> 返回</a>
+            <div class="header-title">隱私與資料授權</div>
+            <div class="header-placeholder"></div>
+        </div>
+
+        <div class="content">
+            <div class="notice-banner warn" id="requiredBanner" style="display:none;">
+                <i class="fas fa-triangle-exclamation" style="margin-top:3px;"></i>
+                <span>條款內容有更新，需要您重新閱讀並同意標示「必填」的項目後，才能繼續使用。</span>
+            </div>
+            <div class="notice-banner" id="manageBanner">
+                <i class="fas fa-circle-info" style="margin-top:3px;"></i>
+                <span>你可以隨時調整「選填」項目的授權；撤回後只影響之後的使用，不會影響先前已合法進行的處理。「必填」項目為使用本服務所必須，無法單獨撤回，如不同意請聯繫客服申請刪除帳號。</span>
+            </div>
+
+            <div id="consentList"><div class="empty-state">載入中...</div></div>
+            <button type="button" class="save-btn" id="saveBtn" onclick="saveConsents()" style="display:none;">儲存</button>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        const API_BASE_URL = "https://128gzb5evxna.shares.zrok.io";
+
+        const originalFetch = window.fetch;
+        window.fetch = async function() {
+            let [resource, config] = arguments;
+            if (typeof resource === 'string' && resource.includes(API_BASE_URL)) {
+                config = config || {};
+                config.headers = config.headers || {};
+                config.headers['skip_zrok_interstitial'] = 'true';
+                const token = localStorage.getItem('access_token');
+                if (token) config.headers['Authorization'] = 'Bearer ' + token;
+            }
+            return originalFetch(resource, config);
+        };
+
+        if (!localStorage.getItem('access_token')) window.location.href = 'login.html';
+
+        const forced = new URLSearchParams(location.search).get('required') === '1';
+        if (forced) {
+            document.getElementById('requiredBanner').style.display = 'flex';
+            document.getElementById('backBtn').style.visibility = 'hidden';
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.innerText = msg;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 2800);
+        }
+
+        let items = [];
+
+        function updateSaveBtn() {
+            const allRequiredOk = items.filter(i => i.required)
+                .every(i => document.getElementById('consent-' + i.code).checked);
+            document.getElementById('saveBtn').disabled = !allRequiredOk;
+        }
+
+        function render() {
+            const box = document.getElementById('consentList');
+            box.innerHTML = '';
+            items.forEach(item => {
+                const card = document.createElement('div');
+                card.className = 'consent-card' + (item.needs_action ? ' needs-action' : '');
+
+                const row = document.createElement('div');
+                row.className = 'consent-row';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.id = 'consent-' + item.code;
+                cb.checked = item.granted === true;
+                // 已經同意的必填項目不能在這裡取消（後端也會擋）
+                cb.disabled = item.required && item.granted === true;
+                cb.addEventListener('change', updateSaveBtn);
+
+                const label = document.createElement('label');
+                label.className = 'consent-label';
+                label.htmlFor = cb.id;
+                const tagReq = document.createElement('span');
+                tagReq.className = 'tag ' + (item.required ? 'req' : 'opt');
+                tagReq.textContent = item.required ? '必填' : '選填';
+                const tagVer = document.createElement('span');
+                tagVer.className = 'tag ver';
+                tagVer.textContent = 'v' + item.version;
+                label.append(tagReq, tagVer);
+                if (item.needs_action) {
+                    const tagNew = document.createElement('span');
+                    tagNew.className = 'tag new';
+                    tagNew.textContent = '需要同意';
+                    label.append(tagNew);
+                } else if (item.granted === null) {
+                    const tagNew = document.createElement('span');
+                    tagNew.className = 'tag new';
+                    tagNew.textContent = '新版本尚未表態';
+                    label.append(tagNew);
+                }
+                const title = document.createElement('div');
+                title.textContent = item.title;
+                title.style.marginTop = '4px';
+                const summary = document.createElement('div');
+                summary.className = 'consent-summary';
+                summary.textContent = item.summary || '';
+                label.append(title, summary);
+                row.append(cb, label);
+
+                const toggle = document.createElement('button');
+                toggle.type = 'button';
+                toggle.className = 'toggle-body';
+                toggle.textContent = '查看全文';
+                const body = document.createElement('div');
+                body.className = 'body-box';
+                body.textContent = item.body;
+                toggle.addEventListener('click', () => {
+                    const open = body.classList.toggle('open');
+                    toggle.textContent = open ? '收合全文' : '查看全文';
+                });
+
+                card.append(row, toggle, body);
+                box.appendChild(card);
+            });
+            document.getElementById('saveBtn').style.display = items.length ? 'block' : 'none';
+            document.getElementById('saveBtn').textContent = forced ? '同意並繼續' : '儲存';
+            updateSaveBtn();
+        }
+
+        async function loadConsents() {
+            try {
+                const res = await fetch(API_BASE_URL + '/api/consent/me');
+                if (res.status === 401) {
+                    localStorage.removeItem('access_token');
+                    window.location.href = 'login.html';
+                    return;
+                }
+                if (!res.ok) throw new Error('載入失敗');
+                items = (await res.json()).items || [];
+                if (!items.length) {
+                    document.getElementById('consentList').innerHTML = '<div class="empty-state">目前沒有需要確認的條款</div>';
+                    return;
+                }
+                render();
+            } catch (err) {
+                console.error(err);
+                document.getElementById('consentList').innerHTML = '<div class="empty-state">載入失敗，請重新整理再試一次</div>';
+            }
+        }
+
+        async function saveConsents() {
+            const btn = document.getElementById('saveBtn');
+            const consents = items.map(i => ({
+                code: i.code, version: i.version, granted: document.getElementById('consent-' + i.code).checked
+            }));
+            btn.disabled = true;
+            try {
+                const res = await fetch(API_BASE_URL + '/api/consent/me', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ consents })
+                });
+                const body = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    showToast(typeof body.detail === 'string' ? body.detail : '儲存失敗，請稍後再試');
+                    btn.disabled = false;
+                    return;
+                }
+                showToast('已儲存');
+                if (forced) {
+                    setTimeout(() => { window.location.href = 'dashboard.html'; }, 700);
+                } else {
+                    await loadConsents();
+                }
+            } catch (err) {
+                console.error(err);
+                showToast('連線伺服器失敗，請稍後再試。');
+                btn.disabled = false;
+            }
+        }
+
+        loadConsents();
+    </script>
+</body>
+</html>
